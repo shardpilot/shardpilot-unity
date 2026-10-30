@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package and metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate changelog
+        run: python3 .github/scripts/changelog-check.py
+      - name: Validate package and metadata
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import subprocess
+
+          files = [Path(p) for p in subprocess.check_output(['git', 'ls-files', '-z']).decode().split(chr(0)) if p]
+          assert files, 'Empty package tree'
+          package = json.loads(Path('package.json').read_text())
+          assert package['name'] == 'com.shardpilot.unity', 'Unexpected package name'
+          assemblies = [p for p in files if p.suffix == '.asmdef']
+          assert assemblies, 'Missing assembly definitions'
+          for path in assemblies:
+              json.loads(path.read_text())
+
+          def imported(path):
+              parts = path.parts[1:] if path.parts[:1] == ('Samples~',) else path.parts
+              return bool(parts) and not any(p.startswith('.') or p.endswith(('~', '.tmp')) or p.lower() == 'cvs' for p in parts)
+
+          assets = {p for f in files if f.suffix != '.meta' for p in (f, *f.parents) if imported(p)}
+          assert assets, 'No importable assets'
+          for path in sorted(assets):
+              assert Path(str(path) + '.meta').is_file(), f'Missing metadata: {path}'
+          metadata = [p for p in files if p.suffix == '.meta']
+          assert metadata, 'No committed metadata'
+          seen = {}
+          for path in metadata:
+              assert Path(str(path)[:-5]).exists(), f'Orphan metadata: {path}'
+              guids = re.findall(r'^guid: *(.*)$', path.read_text(), re.M)
+              assert len(guids) == 1 and re.fullmatch(r'[0-9a-fA-F]{32}', guids[0]), f'Invalid GUID: {path}'
+              guid = guids[0].lower()
+              assert guid not in seen, f'Duplicate GUID: {path} and {seen.get(guid)}'
+              seen[guid] = path
+          print(f'Validated package, {len(assemblies)} assemblies, {len(assets)} asset paths and {len(seen)} GUIDs.')
+          PY
+
+  gitleaks:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Fetch pull-request history
+        run: git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*'
+      - name: Scan all fetched history
+        run: |
+          docker run --rm --volume "$GITHUB_WORKSPACE:/repo:ro" --workdir /repo \
+            --env GIT_CONFIG_COUNT=1 --env GIT_CONFIG_KEY_0=safe.directory \
+            --env GIT_CONFIG_VALUE_0=/repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git --log-opts=--all --redact --verbose --no-banner /repo

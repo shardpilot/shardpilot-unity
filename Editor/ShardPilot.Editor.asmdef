@@ -1,0 +1,11 @@
+{
+  "name": "ShardPilot.Editor",
+  "rootNamespace": "ShardPilot.Editor",
+  "references": [
+    "ShardPilot.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": true
+}

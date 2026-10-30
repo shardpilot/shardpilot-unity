@@ -1,0 +1,32 @@
+{
+  "name": "com.shardpilot.unity",
+  "displayName": "ShardPilot Unity SDK",
+  "version": "0.13.0-alpha",
+  "unity": "2022.3",
+  "description": "Unity SDK for ShardPilot app-first analytics and sanitized crash telemetry.",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "ODSOFT LLC"
+  },
+  "keywords": [
+    "analytics",
+    "telemetry",
+    "crash-reporting"
+  ],
+  "samples": [
+    {
+      "displayName": "Basic Telemetry",
+      "description": "Minimal initialization, session start, and event tracking.",
+      "path": "Samples~/BasicTelemetry"
+    },
+    {
+      "displayName": "Engine Smoke",
+      "description": "Minimal initialization, event tracking, flush, and handled crash capture.",
+      "path": "Samples~/EngineSmoke"
+    }
+  ],
+  "dependencies": {
+    "com.unity.modules.unitywebrequest": "1.0.0",
+    "com.unity.modules.androidjni": "1.0.0"
+  }
+}
