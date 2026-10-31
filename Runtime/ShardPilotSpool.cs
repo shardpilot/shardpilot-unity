@@ -318,7 +318,6 @@ namespace ShardPilot
 
         private const string WipeOwedMarkerKeyPrefix = "shardpilot.spool.wipe_owed.";
         private const string SuppressedMarkerKeyPrefix = "shardpilot.spool.suppressed.";
-        private const string SweepOwedMarkerKeyPrefix = "shardpilot.spool.sweep_owed.";
 
         /// <summary>
         /// Upper bound of the persisted suppression list (ids whose failed
@@ -539,16 +538,6 @@ namespace ShardPilot
         }
 
         /// <summary>
-        /// The directory-scoped key of the owed-sweep marker, exposed so
-        /// tests can seed and inspect it.
-        /// </summary>
-        internal static string SweepOwedMarkerKeyForTesting(ShardPilotConfig config)
-        {
-            var directory = ResolveDirectory(config);
-            return directory == null ? null : SweepOwedMarkerKey(directory);
-        }
-
-        /// <summary>
         /// The per-scope key of the suppressed-ids marker, exposed so tests
         /// can seed and inspect it.
         /// </summary>
@@ -718,12 +707,9 @@ namespace ShardPilot
         }
 
         /// <summary>
-        /// True when a consent sweep of the directory this config resolves
-        /// to is still OWED (its directory-scoped marker is set). Lets a
-        /// client that SKIPPED a de-duplicated sweep honor the outcome of
-        /// the sweep another client ran over the same directory. An
-        /// unreadable marker store fails open, consistent with the settle
-        /// path. Never throws.
+        /// Unknown metadata holds this plane; known pending paths hold this
+        /// directory and possible aliases until checked original-path retries
+        /// settle them. Independent directories stay available. Never throws.
         /// </summary>
         internal static bool IsSweepOwedAtResolvedDirectory(
             ShardPilotConfig config,
@@ -737,8 +723,7 @@ namespace ShardPilot
                     return false;
                 }
 
-                return !string.IsNullOrEmpty(
-                    ShardPilotConfig.Trim(store.Get(SweepOwedMarkerKey(directory))));
+                return ShardPilotDirectorySweep.Owed(store, ShardPilotDirectorySweep.EventKey, directory);
             }
             catch
             {
@@ -750,25 +735,23 @@ namespace ShardPilot
             Action<string> log, bool sweepOwed)
         {
             var directory = ResolveDirectory(config);
-            var swept = sweepOwed ? WipeAllScopesAtResolvedDirectory(config, store, log)
-                : string.IsNullOrEmpty(directory) || TrySettleOwedSweep(directory, store, log);
+            var swept = string.IsNullOrEmpty(directory) || ShardPilotDirectorySweep.Retry(store,
+                ShardPilotDirectorySweep.EventKey, directory, owed => SweepDirectoryFiles(owed, store, log), sweepOwed);
             // A denied append can leave a file marker after the directory sweep.
             return swept && TrySettleOwedWipe(store, WipeOwedMarkerKeyPrefix +
                 ScopeHash(config.WorkspaceKey, config.AppKey, config.EnvironmentKey), log);
         }
 
         /// <summary>
-        /// Runs one consent sweep over a directory, wiping every canonical
-        /// spool file, and reports whether it FULLY succeeded. FAIL-CLOSED:
-        /// a failed enumeration — the sweep cannot even know which files
-        /// exist — or any failed file wipe records a DIRECTORY-scoped
-        /// "sweep owed" marker (value: the directory path); construction
-        /// honors it by re-running the sweep BEFORE any load and keeps the
-        /// spool disabled for that directory until a sweep completes, exactly
-        /// like the file-level owed marker. A completed sweep clears the
-        /// marker.
+        /// Captures directory obligations before file I/O and retires only those
+        /// captures after a successful sweep. Failed or unknown metadata withholds
+        /// acknowledgment; later construction retries the captured original paths.
         /// </summary>
-        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
+        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log) =>
+            ShardPilotDirectorySweep.Sweep(markerStore, ShardPilotDirectorySweep.EventKey, directory,
+                owed => SweepDirectoryFiles(owed, markerStore, log));
+
+        private static bool SweepDirectoryFiles(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
         {
             var succeeded = true;
             try
@@ -930,41 +913,6 @@ namespace ShardPilot
                 succeeded = false;
             }
 
-            try
-            {
-                if (markerStore != null)
-                {
-                    if (succeeded)
-                    {
-                        if (!string.IsNullOrEmpty(ShardPilotConfig.Trim(markerStore.Get(SweepOwedMarkerKey(directory)))))
-                        {
-                            markerStore.Set(SweepOwedMarkerKey(directory), string.Empty);
-                        }
-                    }
-                    else
-                    {
-                        markerStore.Set(SweepOwedMarkerKey(directory), directory);
-                        if (log != null)
-                        {
-                            try
-                            {
-                                log("shardpilot spool: consent sweep could not complete; " +
-                                    "sweep owed — retried before any load on a later launch");
-                            }
-                            catch
-                            {
-                                // Logging is best-effort.
-                            }
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // Best-effort marker maintenance; an uncleared marker only
-                // costs one redundant (idempotent) sweep on a later launch.
-            }
-
             return succeeded;
         }
 
@@ -974,32 +922,9 @@ namespace ShardPilot
         /// sweep completed (marker cleared); false while it remains owed —
         /// the caller fails closed for this directory. Never throws.
         /// </summary>
-        private static bool TrySettleOwedSweep(string directory, IShardPilotKeyValueStore store, Action<string> log)
-        {
-            if (store == null)
-            {
-                return true;
-            }
-
-            string owed;
-            try
-            {
-                owed = ShardPilotConfig.Trim(store.Get(SweepOwedMarkerKey(directory)));
-            }
-            catch
-            {
-                // An unreadable store is a separate failure domain; fail open
-                // on the STORE, consistent with the other markers.
-                return true;
-            }
-
-            if (string.IsNullOrEmpty(owed))
-            {
-                return true;
-            }
-
-            return SweepDirectory(owed, store, log);
-        }
+        private static bool TrySettleOwedSweep(string directory, IShardPilotKeyValueStore store, Action<string> log) =>
+            ShardPilotDirectorySweep.Retry(store, ShardPilotDirectorySweep.EventKey, directory,
+                owed => SweepDirectoryFiles(owed, store, log));
 
         /// <summary>
         /// Extracts the scope hash from a spool file name, or null when the
@@ -1586,7 +1511,7 @@ namespace ShardPilot
                     for (var i = 0; i < events.Count; i++)
                     {
                         var ev = events[i];
-                        if (ev == null || string.IsNullOrEmpty(ev.Id) || _ids.Contains(ev.Id) ||
+                        if (ev == null || ev.NonObjectionOrigin != null || string.IsNullOrEmpty(ev.Id) || _ids.Contains(ev.Id) ||
                             (stagedIds != null && stagedIds.Contains(ev.Id)))
                         {
                             continue;
@@ -3749,16 +3674,6 @@ namespace ShardPilot
 
                 return builder.ToString();
             }
-        }
-
-        /// <summary>
-        /// The marker key for an owed DIRECTORY sweep. Hashed from the
-        /// lowercased canonical directory so spellings align with the
-        /// case-insensitive ownership comparisons.
-        /// </summary>
-        private static string SweepOwedMarkerKey(string directory)
-        {
-            return SweepOwedMarkerKeyPrefix + HashText(directory.ToLowerInvariant());
         }
 
         private void Log(string message)

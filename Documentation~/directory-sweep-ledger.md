@@ -1,0 +1,13 @@
+# Directory-sweep intent ledger
+
+Event, crash and ANR directory sweeps use this internal metadata ledger through a separate filesystem adapter.
+Each plane supplies a stable settings key. Entries contain a fresh intent ID and a lexically normalized absolute owning path; filesystem aliases are not inferred here.
+File-backed capture authority names the exact normalized configured settings directory. A different metadata pathname grants no alias authority; the conservative writer grouping is separate.
+Reads copy immutable entries. Retirement requires captured IDs and paths from the same backend and namespace, preserving later intents even for the same directory.
+A nonblocking in-process reservation serializes metadata operations across wrappers sharing a backend identity. Busy or failed storage grants no authority.
+Canonical JSON binds the exact configured backend and namespace, with 32-entry and 64-KiB UTF-8 limits. The minimum header is bounded before accepting a backend. Unknown, duplicate-key or noncanonical input is preserved and refused.
+An append exceeding either bound persists a hold while retaining existing entries. A held ledger grants no authority and has no automatic reset or eviction.
+Write failure returns no receipt. Fresh sweeps capture existing obligations for the same normalized directory and a new ID before file I/O; successful I/O retires only those captures. Metadata alone never proves filesystem completion.
+Retries use existing captures and their recorded original paths, so repeated failure does not fill the ledger. Known pending paths hold their directory and physically confirmed case aliases; an unavailable alias probe withholds authority. Known independent paths remain available while their own debts are preserved. A refused retirement requires a fresh checked read proving that remaining debt is independent; a write that leaves metadata unknown still holds the plane's settings namespace. Alias matching grants no capture retirement authority. Unity settings use their exact configured file fallback for these records, separately from composite PlayerPrefs identity.
+Negative recovery checks all three seeded payload byte hashes, exact owning-path debt and a modern same-actor primary Denied record before construction. Granted controls accept the current writer's actor-bound modern grant or exact bare grant. Optional retired markers are outside the witness; intentional zero states and sender controls remain explicit.
+Direct sweep fixtures require another directory's successful deletion to preserve the original debt and payload bytes, with same-canonical-directory acknowledgment as a positive control.

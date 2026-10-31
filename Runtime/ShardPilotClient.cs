@@ -517,6 +517,8 @@ namespace ShardPilot
             public readonly bool ReplacesOwedStart;
             public int PendingStartThreadId;
             public bool StartAccepted;
+            public object NonObjectionOrigin;
+            public bool OriginCaptured;
             public DateTime LatestAcceptedTimestampUtc;
             public DateTime AutomaticEndUtc;
 
@@ -539,12 +541,12 @@ namespace ShardPilot
             // start before its event. Initial lazy creation remains unannounced.
             public readonly bool OwedStart;
 
-            public SessionState(string id, long sequence, bool owedStart, SessionLifecycle lifecycle = null)
+            public SessionState(string id, long sequence, bool owedStart, SessionLifecycle lifecycle = null, object nonObjectionOrigin = null)
             {
                 Id = id;
                 Sequence = sequence;
                 OwedStart = owedStart;
-                Lifecycle = lifecycle ?? new SessionLifecycle();
+                Lifecycle = lifecycle ?? new SessionLifecycle { NonObjectionOrigin = nonObjectionOrigin, OriginCaptured = nonObjectionOrigin != null };
             }
 
             public SessionState WithSequence(long sequence)
@@ -3246,6 +3248,7 @@ namespace ShardPilot
                 Event = new ShardPilotEvent
                 {
                     Name = "app.session_ended",
+                    NonObjectionOrigin = _sessionState.Lifecycle.NonObjectionOrigin,
                     SessionId = _sessionState.Id,
                     SessionSequence = _sessionState.Sequence + 1,
                     TimestampUtc = endedAtUtc,
@@ -3258,7 +3261,7 @@ namespace ShardPilot
                 Run = _lifecycleRun,
                 Epoch = _lifecycleTransitionsEpoch
             };
-            _sessionState = new SessionState(null, 0, true);
+            _sessionState = new SessionState(null, 0, true, nonObjectionOrigin: claim.Event.NonObjectionOrigin);
             return claim;
         }
 
@@ -3272,6 +3275,7 @@ namespace ShardPilot
             try
             {
                 prepared = PrepareEvent(claim.Event);
+                prepared.NonObjectionOrigin = claim.Event.NonObjectionOrigin;
             }
             catch (Exception ex)
             {
@@ -3499,7 +3503,7 @@ namespace ShardPilot
                 {
                     var flipsBackgroundState = paused == (_backgroundedAtUtc == default(DateTime));
                     if (IntakeClosed || !flipsBackgroundState) return;
-                    if (_consentState == ShardPilotConsentState.Granted)
+                    if (AnalyticsAdmittedLocked)
                     {
                         RefreshLifecycleTransitionsLocked();
                         _lifecycleTransitions++;
@@ -3531,7 +3535,7 @@ namespace ShardPilot
                 {
                     EnqueueSessionEnd(claim);
                 }
-                if (!paused && ConsentState == ShardPilotConsentState.Granted)
+                if (!paused && AnalyticsAdmissionCurrent())
                 {
                     // Resume also discharges a fresh start owed after consent
                     // loss, whose old pause and session were already discarded.
@@ -3562,7 +3566,7 @@ namespace ShardPilot
                     _stats.RecordRefusal(error);
                     return false;
                 }
-                if (_consentState != ShardPilotConsentState.Granted)
+                if (!AnalyticsAdmittedLocked)
                 {
                     error = ShardPilotConsent.IsDeniedState(_consentState)
                         ? ShardPilotConsent.DeniedError : ShardPilotConsent.UnknownError;
@@ -3655,7 +3659,7 @@ namespace ShardPilot
                 lock (_gate)
                 {
                     if (IntakeClosed) { error = ShardPilotFlushCodes.Shutdown; return false; }
-                    if (_consentState == ShardPilotConsentState.Granted)
+                    if (AnalyticsAdmittedLocked)
                     {
                         // Before owed-start/expired-end work: preview metadata without
                         // spending a session or sequence. The final admission rechecks
@@ -4986,13 +4990,9 @@ namespace ShardPilot
                     return false;
                 }
 
-                // CONSENT-FIRST: only an explicit grant opens the pipeline.
-                // Unknown (no decision yet, or an unreadable decision) and
-                // Denied both refuse the event right here — it is DROPPED at
-                // enqueue, never queued, never spooled, and no analytics
-                // bytes leave the device. The refusal reason is surfaced as
-                // a distinct code through ShardPilotStats.LastError.
-                if (_consentState != ShardPilotConsentState.Granted)
+                // A grant or a current recorded basis admits future ordinary events.
+                // Protected producers and per-event identity overrides still need a grant.
+                if (!AnalyticsEventAdmittedLocked(prepared))
                 {
                     // Both denied flavors (chosen and forced-minor) refuse
                     // with the SAME consent_denied reason.
@@ -5026,10 +5026,10 @@ namespace ShardPilot
 
                 if (_queue.Count >= _config.BufferSize)
                 {
-                    if (_spool == null)
+                    if (_spool == null || _consentState != ShardPilotConsentState.Granted)
                     {
-                        // No spool (disabled/unavailable/WebGL): a full queue
-                        // still drops, exactly as before.
+                        // A basis owns only memory capacity. An absent spool
+                        // uses the same full-queue refusal.
                         _stats.RecordDropped(1);
                         return false;
                     }
@@ -5209,6 +5209,7 @@ namespace ShardPilot
 
             RefreshLifecycleTransitionsLocked();
             var ended = template.Clone();
+            ended.NonObjectionOrigin = lifecycle.NonObjectionOrigin;
             // This is a new construction: none of the template's encoded bytes
             // can describe the session metadata and props chosen below.
             ended.SerializedEnvelope = ended.AdmittedEnvelope = ended.CapturedProps = null;
@@ -5429,6 +5430,7 @@ namespace ShardPilot
                 Event = new ShardPilotEvent
                 {
                     Name = "app.session_ended",
+                    NonObjectionOrigin = replacedEnd.NonObjectionOrigin,
                     SessionId = replacedEnd.SessionId,
                     SessionSequence = replacedEnd.SessionSequence,
                     TimestampUtc = endedAtUtc,
@@ -5451,6 +5453,7 @@ namespace ShardPilot
                 Event = new ShardPilotEvent
                 {
                     Name = "app.session_ended",
+                    NonObjectionOrigin = context.SessionBefore.Lifecycle.NonObjectionOrigin,
                     SessionId = context.SessionBefore.Id,
                     SessionSequence = context.SessionBefore.Sequence + 1,
                     TimestampUtc = endedAtUtc,
@@ -5461,7 +5464,7 @@ namespace ShardPilot
                 Epoch = _lifecycleTransitionsEpoch
             };
             context.SettledEndOwesStart = true;
-            _sessionState = new SessionState(null, 0, true);
+            _sessionState = new SessionState(null, 0, true, nonObjectionOrigin: context.SettledEnd.Event.NonObjectionOrigin);
         }
 
         // Outside _gate: the end a refused replacement settles, and, when it
@@ -5635,6 +5638,8 @@ namespace ShardPilot
 
         private void RecordSessionAcceptanceLocked(ShardPilotEvent ev, SessionLifecycle lifecycle)
         {
+            if (lifecycle != null && !lifecycle.OriginCaptured)
+            { lifecycle.OriginCaptured = true; lifecycle.NonObjectionOrigin = ev.NonObjectionOrigin; }
             if (lifecycle != null && ev.TimestampUtc > lifecycle.LatestAcceptedTimestampUtc)
             {
                 lifecycle.LatestAcceptedTimestampUtc = ev.TimestampUtc;
@@ -7873,6 +7878,7 @@ namespace ShardPilot
                 rejections = new RejectionWindow();
                 RegisterRejections(rejections, _intakeSequence, completion);
             }
+            CloseNonObjection();
             _ = CompleteCloseOperationAsync(completion, timeout, rejections);
             return completion.Task;
         }
@@ -9934,7 +9940,7 @@ namespace ShardPilot
 
             if (_consentOutbox.OwnScope.Contains(marker.IdempotencyKey))
             {
-                var trail = _consentOutbox.OwnScope.SnapshotEntries();
+                var trail = _consentOutbox.OwnScope.SnapshotEntries().FindAll(entry => !entry.IsNonObjection);
                 var isTail = trail.Count > 0 &&
                              string.Equals(
                                  trail[trail.Count - 1].IdempotencyKey,
@@ -9985,7 +9991,7 @@ namespace ShardPilot
                 // of best-effort clears; the backend's last-write-wins row
                 // still postdates the completed grant, so the authoritative
                 // side stays correct.)
-                if (_consentOutbox.OwnScope.Count > 0)
+                if (_consentOutbox.OwnScope.SnapshotEntries().Exists(entry => !entry.IsNonObjection))
                 {
                     DischargeWithheldMarkerDurable();
                     SafeLog(
@@ -10146,7 +10152,7 @@ namespace ShardPilot
             ShardPilotConsentOutboxEntry newestGrant = null;
             foreach (var retained in _consentOutbox.SnapshotEntries())
             {
-                if (!string.Equals(
+                if (retained.IsNonObjection || !string.Equals(
                         retained.AnonymousId, _config.AnonymousId, StringComparison.Ordinal) ||
                     !ShardPilotConsent.IsPlausibleDecisionStamp(retained.DecidedAt))
                 {
@@ -10968,6 +10974,7 @@ namespace ShardPilot
         /// </summary>
         private bool IsConsentReceiptParked(ShardPilotConsentOutboxEntry entry)
         {
+            if (entry.IsNonObjection) return true;
             if (!_consentOutbox.OwnScope.Matches(entry))
             {
                 return true;
@@ -11179,6 +11186,7 @@ namespace ShardPilot
         /// </param>
         private void MaybeKickConsentOutbox(bool workerCadence)
         {
+            Volatile.Read(ref _nonObjectionPulse)?.Invoke();
             if (_httpSender == null)
             {
                 return;
@@ -11520,7 +11528,7 @@ namespace ShardPilot
         /// </summary>
         private bool ConsentReceiptPairQualifiesAsDenialWitnessLocked(ShardPilotConsentOutboxEntry retained)
         {
-            if (retained.AnalyticsGranted ||
+            if (retained.IsNonObjection || retained.AnalyticsGranted ||
                 !string.Equals(retained.AnonymousId, _config.AnonymousId, StringComparison.Ordinal) ||
                 !ShardPilotConsent.IsPlausibleDecisionStamp(retained.DecidedAt))
             {
@@ -11930,7 +11938,7 @@ namespace ShardPilot
 
         private bool DenialWitnessBlocksConsumptionLocked(ShardPilotConsentOutboxEntry settling)
         {
-            if (settling.AnalyticsGranted || !_consentOutbox.HasDurableBackend ||
+            if (settling.IsNonObjection || settling.AnalyticsGranted || !_consentOutbox.HasDurableBackend ||
                 !DenialWitnessStillOwedLocked())
             {
                 return false;
@@ -12582,7 +12590,7 @@ namespace ShardPilot
                 // healed once above, and re-healing per retained entry turns one
                 // write ordering into N — which is observable, and which the
                 // trail's ordering tests assert on.
-                var stillWitness = !held.AnalyticsGranted && _consentOutbox.HasDurableBackend &&
+                var stillWitness = !held.IsNonObjection && !held.AnalyticsGranted && _consentOutbox.HasDurableBackend &&
                                    DenialWitnessStillOwedLocked() &&
                                    ConsentReceiptPairQualifiesAsDenialWitnessLocked(held);
                 if (stillWitness)
@@ -13568,6 +13576,8 @@ namespace ShardPilot
         private PersistOutcome AppendToActiveEventSpoolOutcome(List<ShardPilotEvent> batch, bool provisional,
             out ShardPilotSpool.AppendUndoToken token, bool handoff = false)
         {
+            var memoryOnly = batch != null && batch.Exists(ev => ev.NonObjectionOrigin != null);
+            if (memoryOnly) batch = batch.FindAll(ev => ev.NonObjectionOrigin == null);
             ShardPilotSpool.AppendUndoToken staged = null;
             var result = WithActiveEventSpool(owner =>
             {
@@ -13609,7 +13619,7 @@ namespace ShardPilot
                 return outcome;
             }, PersistOutcome.Failed, PersistOutcome.Failed);
             token = staged;
-            return result;
+            return memoryOnly && result == PersistOutcome.Durable ? PersistOutcome.Failed : result;
         }
 
         private void SpoolAppend(List<ShardPilotEvent> batch)
@@ -15930,6 +15940,7 @@ namespace ShardPilot
             }
 
             var copy = ev.Clone();
+            lock (_gate) copy.NonObjectionOrigin = NonObjectionAdmittedLocked ? _nonObjectionAdmission : null;
             copy.Name = normalizedCustomName ?? ShardPilotConfig.Trim(copy.Name);
             if (string.IsNullOrEmpty(copy.Name))
             {
@@ -17215,6 +17226,7 @@ namespace ShardPilot
                 // wire-ambiguity rules governing from the handoff on.
                 EvictCondemnedFactsLocked(batch);
                 EvictAgeWithdrawnFactsLocked(batch);
+                DropStaleBasisLocked(batch);
 
                 // Dispatch gate: while ANY analytics-GRANT receipt
                 // is retained undispatched — parked behind a Retry-After or
@@ -17272,7 +17284,7 @@ namespace ShardPilot
                 // starting rather than putting the condemned batch on the wire
                 // behind it — read against the global denial epoch, which
                 // SetConsent(false) advances directly.
-                StillPermitted = () => Interlocked.Read(ref _consentDenialEpoch) == denialEpochAtHandoff
+                StillPermitted = () => AnalyticsAdmissionCurrent(denialEpochAtHandoff) && BasisBatchCurrent(batch)
             };
             handoff.Request = request;
             request.BeforeSend = () => PrepareAnalyticsOwnedSend(batch, consentEpoch, handoff, request);
@@ -18113,16 +18125,13 @@ namespace ShardPilot
         {
             var held = batch.Count;
             DropDeniedBatchLocked(batch, consentEpoch);
+            DropStaleBasisLocked(batch);
             EvictCondemnedFactsLocked(batch);
             var discarded = held > 0 && batch.Count == 0;
 
-            // CONSENT-FIRST belt-and-braces: while consent is anything but an
-            // explicit grant, the worker never assembles a batch. The enqueue
-            // gate already keeps the queue empty in non-granted states and
-            // the constructor purges (never loads) the spool without a
-            // persisted grant, so this is structural insurance that no code
-            // path can drain events toward the wire without a grant.
-            if (_consentState != ShardPilotConsentState.Granted)
+            // Recheck current ordinary admission before assembling a batch.
+            // Durable replay still requires the existing persisted-grant path.
+            if (!AnalyticsAdmittedLocked)
             {
                 return discarded;
             }

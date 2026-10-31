@@ -56,7 +56,6 @@ namespace ShardPilot
         private const string HeaderLine = "{\"version\":1}";
 
         private const string WipeOwedMarkerKeyPrefix = "shardpilot.crashspool.wipe_owed.";
-        private const string SweepOwedMarkerKeyPrefix = "shardpilot.crashspool.sweep_owed.";
         private const string RetryAfterMarkerKeyPrefix = "shardpilot.crashspool.retry_after.";
 
         /// <summary>
@@ -954,12 +953,9 @@ namespace ShardPilot
         }
 
         /// <summary>
-        /// True when a consent sweep of the directory this config resolves
-        /// to is still OWED (its directory-scoped marker is set). Lets a
-        /// client that SKIPPED a de-duplicated sweep honor the outcome of
-        /// the sweep another client ran over the same directory. An
-        /// unreadable marker store fails open, consistent with the settle
-        /// path. Never throws.
+        /// Unknown metadata holds this plane; known pending paths hold this
+        /// directory and possible aliases until checked original-path retries
+        /// settle them. Independent directories stay available. Never throws.
         /// </summary>
         internal static bool IsSweepOwedAtResolvedDirectory(
             ShardPilotConfig config,
@@ -973,8 +969,7 @@ namespace ShardPilot
                     return false;
                 }
 
-                return !string.IsNullOrEmpty(
-                    ShardPilotConfig.Trim(store.Get(SweepOwedMarkerKey(directory))));
+                return ShardPilotDirectorySweep.Owed(store, ShardPilotDirectorySweep.CrashKey, directory);
             }
             catch
             {
@@ -986,8 +981,8 @@ namespace ShardPilot
             Action<string> log, bool sweepOwed)
         {
             var directory = ShardPilotSpool.ResolveDirectory(config);
-            var swept = sweepOwed ? WipeAllScopesAtResolvedDirectory(config, store, log)
-                : string.IsNullOrEmpty(directory) || TrySettleOwedSweep(directory, store, log);
+            var swept = string.IsNullOrEmpty(directory) || ShardPilotDirectorySweep.Retry(store,
+                ShardPilotDirectorySweep.CrashKey, directory, owed => SweepDirectoryFiles(owed, store, log), sweepOwed);
             // A denied append can leave a file marker after the directory sweep.
             return swept && TrySettleOwedWipe(store, WipeOwedMarkerKeyPrefix +
                 ScopeHash(config.WorkspaceKey, config.AppKey, config.EnvironmentKey));
@@ -1144,12 +1139,6 @@ namespace ShardPilot
         {
             return WipeOwedMarkerKeyPrefix +
                    ScopeHash(config.WorkspaceKey, config.AppKey, config.EnvironmentKey);
-        }
-
-        internal static string SweepOwedMarkerKeyForTesting(ShardPilotConfig config)
-        {
-            var directory = ShardPilotSpool.ResolveDirectory(config);
-            return directory == null ? null : SweepOwedMarkerKey(directory);
         }
 
         internal static string RetryAfterMarkerKeyForTesting(ShardPilotConfig config)
@@ -1594,32 +1583,15 @@ namespace ShardPilot
             return true;
         }
 
-        private static bool TrySettleOwedSweep(string directory, IShardPilotKeyValueStore store, Action<string> log)
-        {
-            if (store == null)
-            {
-                return true;
-            }
+        private static bool TrySettleOwedSweep(string directory, IShardPilotKeyValueStore store, Action<string> log) =>
+            ShardPilotDirectorySweep.Retry(store, ShardPilotDirectorySweep.CrashKey, directory,
+                owed => SweepDirectoryFiles(owed, store, log));
 
-            string owed;
-            try
-            {
-                owed = ShardPilotConfig.Trim(store.Get(SweepOwedMarkerKey(directory)));
-            }
-            catch
-            {
-                return true;
-            }
+        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log) =>
+            ShardPilotDirectorySweep.Sweep(markerStore, ShardPilotDirectorySweep.CrashKey, directory,
+                owed => SweepDirectoryFiles(owed, markerStore, log));
 
-            if (string.IsNullOrEmpty(owed))
-            {
-                return true;
-            }
-
-            return SweepDirectory(owed, store, log);
-        }
-
-        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
+        private static bool SweepDirectoryFiles(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
         {
             var succeeded = true;
             try
@@ -1753,31 +1725,6 @@ namespace ShardPilot
             catch
             {
                 succeeded = false;
-            }
-
-            try
-            {
-                if (markerStore != null)
-                {
-                    if (succeeded)
-                    {
-                        if (!string.IsNullOrEmpty(ShardPilotConfig.Trim(markerStore.Get(SweepOwedMarkerKey(directory)))))
-                        {
-                            markerStore.Set(SweepOwedMarkerKey(directory), string.Empty);
-                        }
-                    }
-                    else
-                    {
-                        markerStore.Set(SweepOwedMarkerKey(directory), directory);
-                        SafeLog(log, "shardpilot crash spool: consent sweep could not complete; " +
-                                     "sweep owed — retried before any load on a later launch");
-                    }
-                }
-            }
-            catch
-            {
-                // Best-effort marker maintenance; an uncleared marker only
-                // costs one redundant (idempotent) sweep on a later launch.
             }
 
             return succeeded;
@@ -1998,11 +1945,6 @@ namespace ShardPilot
 
                 return builder.ToString();
             }
-        }
-
-        private static string SweepOwedMarkerKey(string directory)
-        {
-            return SweepOwedMarkerKeyPrefix + HashText(directory.ToLowerInvariant());
         }
 
         private void Log(string message)

@@ -19,6 +19,19 @@ namespace ShardPilot
             ShardPilotConsentPolicy.Prepare(context, callback);
         }
 
+        /// <summary>Fences pending policy replies without initializing or changing consent.</summary>
+        public static void InvalidateConsentPolicy() => ShardPilotConsentPolicy.Invalidate();
+
+        /// <summary>Submits a non-objection declaration through the initialized client. The latest host call
+        /// supersedes any pending one, which completes with non_objection_superseded.</summary>
+        public static void RecordNonObjection(EventProperties? record, Action<ShardPilotResult> callback)
+        {
+            if (callback == null) throw new ArgumentNullException(nameof(callback));
+            var client = Client;
+            if (client != null) { client.RecordNonObjection(record, callback); return; }
+            try { callback(new ShardPilotResult(false, "not_initialized", false)); } catch { }
+        }
+
         /// <summary>
         /// Single fixed cache file: the payload itself is stamped with the
         /// (workspace, environment, client, remote-config URL) scope it was
@@ -98,12 +111,18 @@ namespace ShardPilot
         /// - <c>experiments_age_band</c>: accepts a declared assignment age band.
         /// - <c>event_schema_version</c>: validates and preserves a per-event version.
         /// - <c>schema_revision_declaration</c>: false; engine builds do not declare it.
+        /// - <c>consent_policy_advisory</c>: prepares validated advisory reference snapshots;
+        ///   it does not promise non-objection recording or analytics admission.
+        /// - <c>analytics_non_objection</c>: a current recorded ACK admits ordinary analytics
+        ///   in process while consent stays Unknown; special consumers require a grant.
         /// </summary>
         public static bool Supports(string? capability)
         {
             switch (capability)
             {
                 case "consent_receipt_outbox":
+                case "consent_policy_advisory":
+                case "analytics_non_objection":
                 case "consent_state_denied_forced_minor":
                 case "experiments_age_band":
                 // The experiment-assignment consumer exists: the config knob

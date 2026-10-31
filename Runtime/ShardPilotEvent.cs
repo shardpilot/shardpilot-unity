@@ -54,6 +54,8 @@ namespace ShardPilot
         // Process-local close ownership, stamped by the client at admission.
         // Deliberately neither cloned from caller input nor serialized.
         internal object? CloseOwner;
+        // Process-local creation basis; owned copies retain it, wire/storage omit it.
+        internal object? NonObjectionOrigin;
         internal ShardPilotSealedExperimentFact? SealedFact;
 
         internal ShardPilotAnalyticsClock? AnalyticsClock;
@@ -85,6 +87,7 @@ namespace ShardPilot
                 CapturedContext = CapturedContext,
                 SealedFact = SealedFact,
                 AnalyticsClock = AnalyticsClock,
+                NonObjectionOrigin = NonObjectionOrigin,
                 Context = CloneMap(Context),
                 Props = CloneMap(Props)
             };

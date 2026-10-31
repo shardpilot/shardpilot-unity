@@ -49,6 +49,7 @@ namespace ShardPilot
     internal sealed class ShardPilotFileKeyValueStore : IShardPilotKeyValueStore, IShardPilotStoreIdentity
     {
         private readonly string _directory;
+        internal string DirectoryForLedger => _directory;
 
         public ShardPilotFileKeyValueStore(string directory)
         {
@@ -152,6 +153,8 @@ namespace ShardPilot
             // recognized by the consent outbox's ownership registry.
             _identityToken = "unity-playerprefs|" + (directory ?? string.Empty).ToLowerInvariant();
         }
+
+        internal IShardPilotKeyValueStore DirectorySweepStore => _fileFallback;
 
         public string StoreIdentityToken
         {

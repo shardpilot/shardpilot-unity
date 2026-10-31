@@ -3,7 +3,8 @@ name: shardpilot-unity-integration
 description: >-
   Use when integrating the ShardPilot Unity SDK (com.shardpilot.unity) into a
   Unity project or debugging an existing integration — install, credentials,
-  init, the consent-first analytics contract, crash reporting, remote config,
+  init, regional consent preparation, recorded non-objection, crash reporting,
+  remote config,
   explicit experiment applications, offline durability, and verification.
 ---
 
@@ -19,8 +20,9 @@ integration path with the contract rules stated up front.
 
 - **Consent-first analytics**: app-first events (`Track`, `SessionStart`)
   batched to `POST {IngestUrl}/v1/events:batch` over UnityWebRequest, gated
-  behind an explicit player consent grant.
-- **Durable offline spool**: admitted envelopes persist to disk and re-send
+  behind an explicit player consent grant or a current recorded non-objection basis.
+  The latter admits only ordinary, memory-only analytics.
+- **Durable offline spool**: grant-admitted envelopes persist to disk and re-send
   within the spool/retry limits, de-duplicated by stable `event_id` (UUIDv7 for
   ordinary gameplay; CP's `cpx1_` for sealed experiment facts).
 - **Sanitized crash reporting**: managed crashes in-process (Unity-logged exceptions and
@@ -44,28 +46,67 @@ native code) is not captured. The public API is unstable before v1. See
 
 ## Install
 
-After `v0.13.0-alpha` is published, add the package as a UPM git dependency in the project's
+After `v0.14.0-alpha` is published, add the package as a UPM git dependency in the project's
 Packages/manifest.json:
 
 ```json
 {
   "dependencies": {
-    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.13.0-alpha"
+    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.14.0-alpha"
   }
 }
 ```
 
 - Package name: `com.shardpilot.unity`. Requires Unity `2022.3` or later.
 - The `#v…` URL fragment pins the release tag; the owner creates release tags.
-  The candidate version is `0.13.0-alpha`; use a local package until its tag is published.
+  The candidate version is `0.14.0-alpha`; use a local package until its tag is published.
   CI matches this pin to `package.json`, not to the contents or existence of
   a tag. **`v0.11.0-alpha` includes the explicit application/sealed-fact
-  flow.** Unmarked API references below describe `0.13.0-alpha`.
+  flow.** Unmarked API references below describe `0.14.0-alpha`.
   Consent-policy preparation is **preview**: every reply returns the local
   strict fallback with `PlanUsed = false`; received policies are not adopted.
 - For local development, add the package folder through Unity Package
   Manager's local-package flow instead.
 - `v0.7.1-alpha` includes `RequestCompressionEnabled`, absent from `v0.7.0-alpha`.
+
+## Regional preparation and non-objection
+
+`0.14.0-alpha` adds an optional path for future ordinary analytics while consent
+remains `Unknown`; it does not turn an advisory estimate into permission.
+
+1. Before initialization, call `ShardPilotSdk.PrepareConsentPolicy(context, callback)`
+   on Unity's main thread. Supply `ShardPilotConsentPolicyContext` with `AppUrl`,
+   `WorkspaceKey`, `AppKey`, `EnvironmentKey`, `AppVersion`, `Locale`, `Platform`
+   and `Advisory = true`. The identifier-free request has a two-second deadline.
+   Every decision remains `STRICT_OPT_IN`, `PlanUsed = false`; valid unsigned
+   replies report `plan_unsigned`. Preparation grants no consent or admission.
+2. A fully validated `decision.Advisory` is an optional, immutable reference,
+   including matrix provenance, row and jurisdiction. Missing, invalid, refused
+   or fenced replies carry none. Estimates never decide eligibility. Discard
+   stale screen work with `ShardPilotSdk.InvalidateConsentPolicy()`.
+3. After initialization, only if the host has established adult eligibility,
+   presented the notice and a free, simple objection route, and observed no
+   objection, call `ShardPilotSdk.RecordNonObjection(record, callback)` (or the
+   client equivalent). Use the exact closed dictionary described in
+   [Identity & consent](../../../README.md#identity--consent); actor, scope,
+   decision time and idempotency fields belong to the SDK. A token provider takes
+   precedence; failed minting never falls back to a publishable key.
+4. Inspect the callback's `ShardPilotResult`; it settles once within `HttpTimeout`
+   and may run off the Unity host thread. Handle `Retryable` and `RetryAfter`.
+   Only a current validated recording ACK opens future ordinary analytics;
+   earlier refused events stay gone. Consent remains `Unknown`. Capability
+   `analytics_non_objection` detects this path; `consent_policy_advisory` detects
+   only the preparation/advisory surface.
+5. Exact receipts may retry durably, but restart/expired recovery waits for a
+   fresh matching host attestation. Basis-created events never reach the event
+   spool, even after a later grant. A new recording, identity/scope change or
+   denial retires the episode; another ACK cannot revive its queued/session work.
+   Close retains its existing deadline and cannot make these events durable.
+
+Experiments, ad revenue and remote-config targeting still require an explicit
+analytics grant. Exercise this path separately from the grant-based checks below:
+prove pre-ACK refusal, post-ACK ordinary admission with `ConsentState == Unknown`,
+and refusal after an identity change. Do not infer server acceptance from intake.
 
 ## What `v0.7.0-alpha` changed in the contract
 
@@ -127,7 +168,7 @@ your normal secret-delivery path and keep placeholders in the repo.
 
 ## Initialize
 
-The following examples use the `0.13.0-alpha` scope API:
+The following examples use the `0.14.0-alpha` scope API:
 `WorkspaceKey`, `AppKey`, `EnvironmentKey`. Use a local package until its
 tag is published. The earlier `v0.11.0-alpha` tag uses
 `*Id` settings; the new source does not retain them as aliases.
@@ -246,7 +287,8 @@ them around the gate.
   warning. Valid tuples are copied before return and survive scope propagation,
   retries and restart completion unchanged. An ordinary denial after a
   forced-minor decision preserves that decision's original receipt and tuple.
-- **Unknown = drop at enqueue.** Until an explicit `SetConsent(true)`,
+- **Unknown without a current recorded basis = drop at enqueue.** Without
+  that basis or an explicit `SetConsent(true)`,
   `Track`/`SessionStart` refuse at enqueue exactly like `Denied`: the call
   returns `false`, nothing is queued, nothing is spooled, and **zero
   analytics bytes leave the device**. The refusal reason is surfaced as a
@@ -270,7 +312,7 @@ them around the gate.
   process-wide (fail-closed shadow) so a re-init cannot resurrect the stale
   grant.
 - **Per-scope consent receipts, sequenced before the batch.** An explicit
-  receipt in `0.13.0-alpha` uses `workspace_key`, `app_key`
+  receipt in `0.14.0-alpha` uses `workspace_key`, `app_key`
   and `environment_key` without retired `*_id` wire aliases.
   Actor/kind, provenance and idempotency are unchanged. An explicit
   in-session decision posts a small consent receipt to the analytics ingest
@@ -598,7 +640,7 @@ assignment classification, age-attribute compatibility and on-device records.
 
 ## Crash reporting
 
-Version `0.13.0-alpha` emits `app.key` (the configured `AppKey`)
+Version `0.14.0-alpha` emits `app.key` (the configured `AppKey`)
 for fresh JSON crashes and tombstone metadata, without an `app.id` alias.
 Crash/native/debug identities and dump bytes stay
 unchanged.
@@ -668,7 +710,9 @@ unchanged.
 
 What "offline-safe" means here — set expectations, don't fight them:
 
-- These rules cover admitted analytics envelopes. A raw experiment application
+- These rules cover grant-admitted analytics envelopes. Non-objection events
+  remain memory-only; a later grant never promotes them to durable records.
+  A raw experiment application
   is memory-only until sealing and admission; a quit snapshot does not journal
   or dispatch it. See [Experiments](#experiments-explicit-application).
 - A batch that fails **transiently** (connection error, timeout, 429, 5xx)
@@ -743,14 +787,14 @@ against the SDK's observable result surface — return values,
 Stated plainly so you can plan around them; do not paper over these in
 integration code:
 
-- **Android OS exit-info lanes are internal and default-disabled.** They
-  are not host configuration controls. Historical server acceptance observations
+- **Android OS exit-info lanes are public and default-disabled.** Use
+  `NativeCrashExitInfoEnabled` and `AnrExitInfoEnabled` on `ShardPilotConfig`. Historical server acceptance observations
   are not a current deployment guarantee: a permanent
   rejection consumes an OS record rather than deferring it. A metadata-only
   JSON record and a raw tombstone take different routes. Owner observation:
   verify current server acceptance before any SDK enablement of these lanes.
 - **The public hang watchdog** uses `HangWatchdogEnabled` and
-  `HangWatchdogThreshold` (`TimeSpan`); both it and the internal OS lanes
+  `HangWatchdogThreshold` (`TimeSpan`); both it and the OS exit-info lanes
   require the automatic hooks.
 - **The Android lanes are decided at `Initialize`, and an opt-out CONSUMES the
   backlog.** `HangWatchdogEnabled` is read once and the watchdog only starts if
@@ -779,7 +823,7 @@ integration code:
   is the fastest path.
 - **Managed crash hooks only.** No in-process native signal handling
   (segfaults, native plugin crashes) or symbol upload. Hook-captured frames are
-  managed, pre-symbolicated `function`/`file`/`line`; internal Android native
+  managed, pre-symbolicated `function`/`file`/`line`; Android native
   exit-info replay is a separate, default-disabled lane.
 - **Consent receipts ride a DURABLE OUTBOX** since `v0.7.0-alpha`: persisted,
   retried until acknowledged, delivered in decision order PER ACTOR (dispatch
@@ -793,4 +837,4 @@ integration code:
   band forcing decision; see the consent section for how it gates.
 - **WebGL**: no spools (in-memory only), and the worker runs as a
   frame-ticked coroutine.
-- **Release pin**: this guide targets `v0.13.0-alpha`, including request compression. Use a local package until that tag is published.
+- **Release pin**: this guide targets `v0.14.0-alpha`, including request compression. Use a local package until that tag is published.

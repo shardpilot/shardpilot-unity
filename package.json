@@ -1,7 +1,7 @@
 {
   "name": "com.shardpilot.unity",
   "displayName": "ShardPilot Unity SDK",
-  "version": "0.13.0-alpha",
+  "version": "0.14.0-alpha",
   "unity": "2022.3",
   "description": "Unity SDK for ShardPilot app-first analytics and sanitized crash telemetry.",
   "license": "Apache-2.0",

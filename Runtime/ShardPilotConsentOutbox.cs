@@ -47,8 +47,11 @@ namespace ShardPilot
         /// </summary>
         public string Kind;
 
-        /// <summary>The <c>categories.analytics</c> boolean: true iff the decision is a grant.</summary>
+        /// <summary>Analytics grant bit for explicit consent receipts; absent from basis wire bodies.</summary>
         public bool AnalyticsGranted;
+        // A basis is a separate record type, not a false analytics decision.
+        public string NonObjectionBody;
+        internal bool IsNonObjection => NonObjectionBody != null;
 
         /// <summary>ISO-8601 UTC decision moment, stamped once, never re-stamped.</summary>
         public string DecidedAt;
@@ -128,6 +131,7 @@ namespace ShardPilot
         /// </summary>
         public string BuildWireBody(bool emitKind)
         {
+            if (IsNonObjection) return NonObjectionBody;
             var builder = new StringBuilder(256);
             builder.Append("{\"workspace_key\":");
             ShardPilotJson.AppendQuoted(builder, WorkspaceId);
@@ -892,7 +896,7 @@ namespace ShardPilot
                     for (var i = _entries.Count - 1; i >= 0; i--)
                     {
                         var tail = _entries[i];
-                        if (OwnScope.Matches(tail)) return tail.AnalyticsGranted ? null : tail.DecidedAt;
+                        if (OwnScope.Matches(tail) && !tail.IsNonObjection) return tail.AnalyticsGranted ? null : tail.DecidedAt;
                     }
 
                     return null;
@@ -1080,9 +1084,8 @@ namespace ShardPilot
                 kept = SanitizeList(_entries);
                 while (kept.Count > MaxEntries)
                 {
-                    // Denial-preferring (see EvictOnePreferringGrants): the
-                    // oldest PURE GRANT leaves first; the oldest denial only
-                    // in an all-denials overflow.
+                    // Basis receipts leave before explicit decisions; other
+                    // receipts keep the denial-preferring cap ranking.
                     EvictOnePreferringGrants(kept);
                     evicted++;
                 }
@@ -1446,7 +1449,7 @@ namespace ShardPilot
             string currentActorIdentifier,
             string currentAnonymousId)
         {
-            if (entry.RetainedFromCorruption) return false;
+            if (entry.IsNonObjection || entry.RetainedFromCorruption) return false;
 
             // ONLY anon-kinded receipts are droppable here: verified
             // receipts park instead (they may be the only record of that
@@ -1475,6 +1478,7 @@ namespace ShardPilot
         /// the actor server-side under fail-open-on-missing), while a lost
         /// grant only delays pipeline opening and is re-writable.
         /// </summary>
+        // Basis receipts have a separate cap rank and never supersede a denial.
         internal static bool IsPureGrant(ShardPilotConsentOutboxEntry entry)
         {
             return entry.AnalyticsGranted;
@@ -1502,6 +1506,9 @@ namespace ShardPilot
         {
             var parkedJudge = ParkedPredicateForGate;
 
+            for (var i = 0; i < entries.Count - 1; i++)
+                if (entries[i].IsNonObjection) { entries.RemoveAt(i); return; }
+
             // Rank 1 — the oldest SUPERSEDED pure grant: a newer explicit
             // decision durably replaced it as state-backer, so it is the
             // first eligible evictee.
@@ -1513,6 +1520,8 @@ namespace ShardPilot
                     return;
                 }
             }
+
+            if (entries.Count > 0 && entries[entries.Count - 1].IsNonObjection) { entries.RemoveAt(entries.Count - 1); return; }
 
             // Rank 2 — the oldest denial that PRECEDES a retained newer
             // analytics grant (the user's own later grant superseded that
@@ -1592,6 +1601,16 @@ namespace ShardPilot
             entries.RemoveAt(0);
         }
 
+        internal bool NonObjectionAppendBlockedByCap()
+        {
+            lock (_lock)
+            {
+                var entries = SanitizeList(_entries); var evictable = 0;
+                foreach (var entry in entries) if (entry.IsNonObjection || (IsPureGrant(entry) && entry.Superseded)) evictable++;
+                return entries.Count + 1 - MaxEntries > evictable;
+            }
+        }
+
         /// <summary>
         /// The <c>consent_outbox_full</c> fail-closed grant gate:
         /// TRUE when appending ONE MORE pure-grant
@@ -1646,6 +1665,7 @@ namespace ShardPilot
 
                 for (var i = 0; i < sanitized.Count; i++)
                 {
+                    if (sanitized[i].IsNonObjection) { evictable++; continue; }
                     if (IsPureGrant(sanitized[i]) && sanitized[i].Superseded)
                     {
                         evictable++;
@@ -1977,6 +1997,9 @@ namespace ShardPilot
             }
 
             entry.AnalyticsGranted = (bool)analytics;
+            if (value.TryGetValue("non_objection_body", out var body) && !(body is string)) return null;
+            entry.NonObjectionBody = body as string;
+            if (entry.IsNonObjection && rawKind == null) return null;
             object retained;
             entry.RetainedFromCorruption = value.TryGetValue("retained_from_corruption", out retained) &&
                                            retained is bool && (bool)retained;
@@ -2157,6 +2180,7 @@ namespace ShardPilot
                 return null;
             }
 
+            if (entry.IsNonObjection && !ShardPilotNonObjectionReceipt.Valid(entry)) return null;
             return entry;
         }
 
@@ -2242,6 +2266,7 @@ namespace ShardPilot
                 }
 
                 entry.AppendNotice(builder);
+                if (entry.IsNonObjection) { builder.Append(",\"non_objection_body\":"); ShardPilotJson.AppendQuoted(builder, entry.NonObjectionBody); }
                 builder.Append('}');
             }
 

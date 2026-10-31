@@ -10,14 +10,19 @@ requests and their uncompressed retries; request-specific headers cannot replace
 
 ## Status
 
+- A [directory-sweep intent ledger](Documentation~/directory-sweep-ledger.md) preserves captured owning-path debts across independent directories and retries original paths before loading. Known independent paths stay available after checked replay of refused retirement writes; unknown metadata or alias identity withholds acknowledgment.
+- Directory-sweep recovery fixtures pair persisted denial witnesses with sender controls across separate processes.
+- Sweep debt isolation fixtures pair independent directories with same-canonical-directory acknowledgment controls.
+
 - Withdrawal durability uses immutable journal frames, checked file storage and canonical shared-state ownership. Discovery follows the spool's workspace/app/environment namespace; each frame retains its captured assignment scope. Fixed decisions and independent assignment/pipeline receipts require flushed journal revisions. A failed shared journal can reopen and synchronize replay in-process while retaining its owner; damaged input grants no authority. Unknown storage withholds authority, and later admissions persist their sealed identity exemptions before enqueue; see [withdrawal projections](Documentation~/withdrawal-projections.md).
 - Only shared state owns a journal Work lease. Pending objects, wrappers and clients borrow; completed work releases its lease after its last active operation finishes. Incomplete memory-only work remains in canonical state. Test reset is [quiescent global teardown](Documentation~/withdrawal-projections.md#shared-state-reset-contract) and refuses atomically while an operation is active.
+- Dark-successor handoff completion is observed through a held full journal snapshot; incomplete-only discovery intentionally omits completed frames.
 - A withdrawal journal reclaims completed history when a valid admission needs capacity, preserving unfinished canonical frames and their full historical byte charge. File storage publishes a checked, flushed recovery image before rebuilding through its exclusively held journal handle; incomplete recovery withholds authority. Invalid transitions and all-unfinished capacity refuse without eviction. Memory-only storage remains non-persistent.
 - A held journal rebuild retains its writer reservation and actual-file exclusion while client disposal returns promptly; independent paths remain writable. Barrier-controlled checks verify admission and replay after the hold is released.
 - An owner-scoped reclaim epoch fences stale revision-one captures, preventing a retired withdrawal from becoming a fresh destructive operation after its history is removed. Weak capture metadata follows live canonical frames. A staged initial append that never attempts Write releases its capture; an attempted write requires proof of zero bytes. Ordinary replay retains the epoch, while completing prepared reclamation advances it. Fresh post-reclaim admissions remain possible.
 - Experiment cache fences, emissions, progress, mint fallback and lifecycle matching share the journal owner's confirmed namespace, separately from conservative condemnation. Regressions pair independent case-distinct directories with canonical and confirmed-alias controls. Permitted initialized consumers establish the ordinary cache root before binding; closed gates and flag-off consumers create no directory or journal. Assignment clear serializes its availability check, deletion and corrupt-marker cleanup with sibling publication.
 - When both lifecycle identities remain unbound, a matching configured namespace and tenant scope can revoke the enabled predecessor without I/O or directory creation. This pre-binding match grants no cache or projection authority; independent directories and tenants remain independent.
-- `0.13.0-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
+- `0.14.0-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
 - Before that tag is published, use the local-package flow for this candidate. The public API is unstable before v1.
 - Implemented and tested: app-first event tracking, sessions, bounded async batching over UnityWebRequest, durable offline spools (analytics events AND crash reports) with resend on next launch, bearer auth, consent-first analytics gating, an independent persisted crash-reporting opt-out, sanitized crash capture, and an ETag/If-None-Match remote-config disk cache.
 - `IngestUrl` defaults to `https://ingest.shardpilot.com` and a build that omits it uses that. The IDENTIFIERS and KEYS in the samples below are placeholders: `WorkspaceKey`, `AppKey`, `EnvironmentKey` and `PublishableKey` come from your ShardPilot workspace and resolve to nothing until you supply your own.
@@ -27,28 +32,28 @@ requests and their uncompressed retries; request-specific headers cannot replace
 
 - Tracks app-first events (`Track`) and sessions (`SessionStart`) and ships them as batches to `POST {IngestUrl}/v1/events:batch`.
 - Buffers events in a bounded in-memory queue, drained by a single SDK worker on a flush cadence; supports explicit `FlushAsync` and `CloseAsync`.
-- Persists undeliverable events to a durable on-disk spool and re-sends them on the next launch, de-duplicated by the ingest service via the stable `event_id` — see [Offline durability](#offline-durability).
+- Persists undeliverable grant-admitted events to a durable on-disk spool and re-sends them on the next launch, de-duplicated by the ingest service via the stable `event_id` — see [Offline durability](#offline-durability).
 - Captures sanitized crashes from Unity log exceptions and unhandled CLR exceptions and ships them to a dedicated crash ingest endpoint (`POST {CrashUrl}/api/v1/crashes/ingest`), separate from analytics events, as a crash report JSON body stamped with the component `component` slug; fatal crashes are never sampled away. Every report is persisted to a durable crash spool at capture time and re-sent on the next launch until the crash ingest service acknowledges it — see [Crash capture](#crash-capture).
-- Gates analytics **consent-first**: nothing is tracked, buffered, or sent until an explicit `SetConsent(true)`; the persisted tri-state decision posts a receipt to `POST {IngestUrl}/v1/consent` through a durable outbox (retried until acknowledged, delivered in decision order **per actor** — dispatch skips receipts parked for an actor this session cannot vouch for, so a newer receipt for the current actor can land before an older parked one; see [Authentication](#authentication-dual-mode)). Crash reporting is an independent legitimate-interest plane — on by default, persisted opt-out via `SetCrashReportingEnabled(false)`.
+- Gates analytics **consent-first**: ordinary analytics requires an explicit `SetConsent(true)` or a current recorded non-objection basis (memory-only); the persisted tri-state decision posts a receipt to `POST {IngestUrl}/v1/consent` through a durable outbox (retried until acknowledged, delivered in decision order **per actor** — dispatch skips receipts parked for an actor this session cannot vouch for, so a newer receipt for the current actor can land before an older parked one; see [Authentication](#authentication-dual-mode)). Crash reporting is an independent legitimate-interest plane — on by default, persisted opt-out via `SetCrashReportingEnabled(false)`.
 - Fetches remote config from the remote-config endpoint with an on-disk ETag cache that serves stale snapshots on `304`/transient failure, fails closed on `401`/`403`, and fails permanently (no stale serving) on other unexpected statuses.
 
 ## Installation
 
-After `v0.13.0-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
+After `v0.14.0-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
 
 ```json
 {
   "dependencies": {
-    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.13.0-alpha"
+    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.14.0-alpha"
   }
 }
 ```
 
-The snippet targets the `v0.13.0-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
+The snippet targets the `v0.14.0-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
 
 ## Quick start
 
-This quickstart uses the `0.13.0-alpha` scope API: `WorkspaceKey`,
+This quickstart uses the `0.14.0-alpha` scope API: `WorkspaceKey`,
 `AppKey` and `EnvironmentKey`. The earlier `v0.11.0-alpha` tag uses `*Id`
 settings; current source has no aliases for those retired property names.
 
@@ -128,7 +133,7 @@ public sealed class ShardPilotQuickstart : MonoBehaviour
 
 ### Android capture opt-ins
 
-These default-off opt-ins are included in `0.13.0-alpha`. Until its tag is
+These default-off opt-ins are included in `0.14.0-alpha`. Until its tag is
 published, use UPM's local-package flow with the release candidate.
 Add them to the initializer above only after configuring crash credentials and
 an eligible age/consent decision (see [Crash capture](#crash-capture)):
@@ -305,8 +310,8 @@ Integrating with an AI coding tool (Claude Code or similar)? This repository shi
 | `AppUrl` | empty | App origin for config and experiments; an address does not enable remote config. |
 | `RemoteConfigEnabled` | `false` | Enable explicit config fetches; requires `AppUrl` and `PublishableKey`. |
 | `CrashHooksEnabled` | `true` | Install automatic managed-exception hooks during initialization. |
-| `NativeCrashExitInfoEnabled` | `false` | **Unreleased (current source).** Android next-launch native/IL2CPP crash capture; API 30+, binary tombstone streams on API 31+. |
-| `AnrExitInfoEnabled` | `false` | **Unreleased (current source).** Android next-launch reports after a system-killed ANR; API 30+. |
+| `NativeCrashExitInfoEnabled` | `false` | **`0.14.0-alpha`.** Android next-launch native/IL2CPP crash capture; API 30+, binary tombstone streams on API 31+. |
+| `AnrExitInfoEnabled` | `false` | **`0.14.0-alpha`.** Android next-launch reports after a system-killed ANR; API 30+. |
 | `Source` | `client` | Analytics-envelope origin: `client` / `server` / `backend`. Distinct from `CrashComponent`. |
 | `CrashUrl` | empty | Separate crash ingest origin, without a route path, query or fragment. Required when `CrashKey` is set; never falls back to `IngestUrl`. |
 | `CrashKey` | — | The `crash:write` Bearer for crash ingest (a different scope from `PublishableKey`/the Mode-B JWT). **When empty, crash capture is disabled** (`CaptureCrash` is a safe no-op). |
@@ -523,7 +528,7 @@ A `409` response with `error.code = schema_revision_mismatch` is a terminal
 batch refusal and is never retried. The SDK declares no schema revision; inspect
 the receiving service's compatibility policy if this diagnostic appears.
 
-**Unreleased (current source):** read `client.Snapshot().LastEventIssue` for the most recent non-accepted
+**`0.14.0-alpha`:** read `client.Snapshot().LastEventIssue` for the most recent non-accepted
 per-event verdict, including suppression, observation, rejection and duplicate
 outcomes. It is `status` or `status:code`, with credentials redacted, and is
 available even with logging off. It starts empty for each client; accepted-only
@@ -568,7 +573,9 @@ unchanged `event_too_large` event.
 
 ## Identity & consent
 
-**Preview:** `ShardPilotSdk.PrepareConsentPolicy(context, callback)` is available before
+**Preview:** regional consent preparation validates replies while every decision remains strict and unused.
+
+`ShardPilotSdk.PrepareConsentPolicy(context, callback)` is available before
 `Initialize`. Call it on Unity's main thread. Supply a
 `ShardPilotConsentPolicyContext` with `AppUrl`,
 `WorkspaceKey`, `AppKey`, `EnvironmentKey`, `AppVersion`, `Locale` and `Platform`.
@@ -587,7 +594,63 @@ vocabulary, with unknown spellings sent as `other`.
 The host receives one immutable local `STRICT_OPT_IN` decision: crash capture off,
 server analytics denied, minimised child rules and explicit grant required.
 `PlanUsed` is false; null `OperationBlocks` means unknown, with source `none`.
-Every response in `0.13.0-alpha` takes this strict path; received policies are not adopted. Preparation never initializes
+Every response in `0.14.0-alpha` takes this strict path; received policies are not adopted.
+
+Replies are byte-bounded and checked for duplicate and unknown fields, required
+values, container shapes, scope and expiry. A valid unsigned reply returns
+`Reason = "plan_unsigned"`; known resolver refusal reasons remain distinct.
+A requested, fully validated advisory is exposed through nullable `decision.Advisory`
+as detached, immutable reference data, including its matrix version. Its nullable
+`Estimate` is informational; it never changes the strict decision or grants consent.
+Absent, refused, invalid or fenced replies carry no advisory. References are never
+cached or reused across requests. `Supports("consent_policy_advisory")` detects this
+preview surface; it does not promise non-objection recording or analytics admission.
+Available signals omit reasons; unavailable signals carry a known reason.
+Refusals cannot carry advisory data. A known advisory row may have no estimate;
+a resolved country without its own row may use `OTHER`.
+A non-objection declaration is separate host data: `eligible_adult`, four explicit
+true attestations, advisory matrix/row/jurisdiction and notice provenance. Its closed
+shape rejects caller-supplied actor, scope and receipt fields. Capturing this data
+grants no consent or analytics permission and performs no recording request.
+Use `client.RecordNonObjection(record, callback)` or the facade
+equivalent. Pass an `IDictionary<string, object>` with exactly these host fields:
+
+| Field or nested path | Value |
+| --- | --- |
+| `advisory` | Map with `matrix`, `row_id` and two-letter uppercase `jurisdiction` from the validated advisory. |
+| `advisory.matrix` | Map with `docs_commit`, `file_sha256` and `date` copied from its matrix. |
+| `age_evidence_class` | `"eligible_adult"`. |
+| `attestation` | Map with `notice_provided`, `free_simple_objection_provided`, `did_not_object` and `eligible`, each explicitly `true`. |
+| `notice_version`, `notice_locale`, `policy_version` | Identifiers for the notice actually presented and its locale; never notice text. |
+
+Do not infer these attestations from an advisory estimate or fabricate matrix provenance.
+These APIs submit one closed declaration to the ingest consent endpoint, using
+SDK-owned scope, actor, decision time and idempotency fields. A configured token
+provider takes precedence, with no publishable fallback after a failed mint. Only
+a provider-backed user identifier uses `user_verified`; other records use the anonymous actor.
+The callback receives a `ShardPilotResult` once within `HttpTimeout`, including retry
+classification and applicable `RetryAfter`. It may run off the Unity host thread.
+Receipts retain their exact body, decision time and idempotency key for paced retries.
+Restored or expired work stays parked until a fresh matching host attestation;
+healing a failed storage write alone never activates it. Capacity protects denial
+receipts and durable grant backing. Without durable storage, shutdown retires basis
+work with a `shutdown_undurable` diagnostic while preserving denial receipts.
+A valid current recording ACK opens future ordinary analytics in the current process,
+with `ConsentState` and stored consent still `Unknown`. Before ACK, events are refused.
+Experiments, ad revenue and remote-config targeting require an explicit grant.
+`Supports("analytics_non_objection")` detects this admission path.
+Current eligibility is rechecked against the captured identity, scope and recording generation.
+The latest host call supersedes any pending recording, whose callback completes
+with `non_objection_superseded`.
+
+Basis-created events remain memory-only after a later explicit grant. A new recording,
+identity or scope change, or denial closes that episode; a later ACK cannot revive it.
+A current episode may drain within the existing close bound. Undelivered memory-only
+work does not survive a restart.
+
+`InvalidateConsentPolicy()` fences pending replies when the host discards a
+consent screen. Changing request context also fences earlier replies; the latest
+request for the same context supersedes older requests. Preparation never initializes
 the SDK, persists a policy, creates an identity or grants consent. Apply the host's
 explicit choice separately through the existing consent API.
 
@@ -597,7 +660,7 @@ retired `*_id` wire roots are absent; actor/kind, decision provenance and
 retry/idempotency behavior are unchanged. This wire change is included in `v0.12.0-alpha`.
 
 - **Anonymous id:** when `AnonymousId` is omitted, `Initialize` loads or creates a stable UUIDv7 at PlayerPrefs key `shardpilot.anonymous_id` (file fallback of the same name under `Application.persistentDataPath` when PlayerPrefs throws). It is stamped on every event as `anonymous_id`, exposed via `ShardPilotClient.AnonymousId`, and carried in `X-ShardPilot-Anonymous-Id` for remote config only with granted analytics consent. Supplying `AnonymousId` skips load-and-create and leaves any persisted value untouched. Assignment rejects ASCII control characters (including CR/LF/NUL/HTAB and DEL) and leading/trailing spaces with `ShardPilotConfigException`, before replacing the previous value; identities are never trimmed into another identity. When `AnonymousId` is omitted, a stored value that fails these checks or the existing 512-byte limit is replaced with a fresh UUIDv7 and rewritten when the store is writable. Explicit unsafe settings still throw; valid stored identities are reused literally.
-- **Consent (`SetConsent(bool analyticsGranted)`, or `SetConsent(ShardPilotConsentDecision)` for the age-gate-forced `DeniedForcedMinor` band) — CONSENT-FIRST:** tri-state, persisted at PlayerPrefs key `shardpilot.consent.analytics` (same file fallback). Only an explicit **`Granted`** opens the analytics pipeline. `Unknown` (never decided, or an unreadable persisted decision) refuses every event at enqueue exactly like `Denied` — the event is dropped (`Track` returns `false`), nothing is queued or spooled, and **zero analytics bytes leave the device**: no batches and no consent receipts while undecided (receipts exist only for explicit decisions). From `v0.7.0-alpha` an explicit decision's receipt rides a **durable outbox** — persisted, retried until acknowledged and delivered in decision order — so a receipt survives an app that terminates or stays offline before the consent endpoint answers; it is no longer fire-and-forget. The refusal reason is surfaced as a distinct code via `ShardPilotStats.LastError`: `consent_unknown` vs `consent_denied`. `Denied` additionally clears the pending queue and the crash breadcrumb trail, discards an in-flight batch as dropped, purges the offline spools, and **suppresses crash capture** (the `anonymous_id` is the diagnostics-consent/erasure subject) — denied/pre-denial activity never appears in a later crash report or batch. A grant opens the pipeline for FUTURE events only; events refused before it are gone by design. A consent-state read failure fails closed end to end: it resolves to `Unknown` (no analytics batch traffic) and the offline spool is purged. Consent never rides the event envelope; receipts go to `POST {IngestUrl}/v1/consent` through that same durable outbox. Server-side, a publishable `PublishableKey` (Mode A) may record **denials only**: a denial receipt is accepted for the key's own scope, while a **grant** receipt is rejected `403` with detail code `consent_grant_requires_verified_credential` and dropped by policy (local consent state is unaffected) — grants are recorded server-side only through a trusted backend credential, so a server-side denial keeps that actor's events suppressed (`suppressed_no_consent`) until such a grant lands — for an ordinary denial, calling `SetConsent(true)` on the device may re-open the **local** pipeline after purge completes but never restores server-side consent. A forced-minor denial cannot be reversed by an ordinary grant. To reverse an ordinary denial, record the grant **from your backend**: post the consent receipt for the actor the SDK's own receipt was keyed on. In Mode A that is **always `anonymous_id`**, even when `UserId` is configured (v0.7's canonical keying), so a grant posted for `user_id` updates a different actor and leaves the anonymous denial as the server's last word. In Mode B it is the JWT's bound subject when one is configured — but a Mode-B client with no valid `UserId` records ANON-keyed receipts too, so restore those against `anonymous_id` as well to the same `POST {IngestUrl}/v1/consent` with a consent-write-capable **service** credential (a server-side ingest token — never ship one in a client build). Client-key consent writes consume ingest budget whether accepted or rejected. The **remote-config fetch** remains available while consent is `Unknown` or either denied flavor, using an identifier-free route with no targeting attributes or identified cache validator. Granted requests may carry the anonymous ID and, when opted in, targeting attributes. The dispatcher rechecks consent before creating the request; see [Remote config](#remote-config). Call from the Unity main thread.
+- **Consent (`SetConsent(bool analyticsGranted)`, or `SetConsent(ShardPilotConsentDecision)` for the age-gate-forced `DeniedForcedMinor` band) — CONSENT-FIRST:** tri-state, persisted at PlayerPrefs key `shardpilot.consent.analytics` (same file fallback). An explicit **`Granted`**, or the current recorded non-objection basis described above, opens ordinary analytics. `Unknown` without that current basis (never decided, or an unreadable persisted decision) refuses every event at enqueue exactly like `Denied` — the event is dropped (`Track` returns `false`), nothing is queued or spooled, and **zero analytics bytes leave the device**: no event batches while undecided without that basis. Ordinary consent receipts require explicit decisions; non-objection recording is the separate host-declared path above. From `v0.7.0-alpha` an explicit decision's receipt rides a **durable outbox** — persisted, retried until acknowledged and delivered in decision order — so a receipt survives an app that terminates or stays offline before the consent endpoint answers; it is no longer fire-and-forget. The refusal reason is surfaced as a distinct code via `ShardPilotStats.LastError`: `consent_unknown` vs `consent_denied`. `Denied` additionally clears the pending queue and the crash breadcrumb trail, discards an in-flight batch as dropped, purges the offline spools, and **suppresses crash capture** (the `anonymous_id` is the diagnostics-consent/erasure subject) — denied/pre-denial activity never appears in a later crash report or batch. A grant opens the pipeline for FUTURE events only; events refused before it are gone by design. A consent-state read failure fails closed end to end: it resolves to `Unknown` (no analytics batch traffic) and the offline spool is purged. Consent never rides the event envelope; receipts go to `POST {IngestUrl}/v1/consent` through that same durable outbox. Server-side, a publishable `PublishableKey` (Mode A) may record **denials only**: a denial receipt is accepted for the key's own scope, while a **grant** receipt is rejected `403` with detail code `consent_grant_requires_verified_credential` and dropped by policy (local consent state is unaffected) — grants are recorded server-side only through a trusted backend credential, so a server-side denial keeps that actor's events suppressed (`suppressed_no_consent`) until such a grant lands — for an ordinary denial, calling `SetConsent(true)` on the device may re-open the **local** pipeline after purge completes but never restores server-side consent. A forced-minor denial cannot be reversed by an ordinary grant. To reverse an ordinary denial, record the grant **from your backend**: post the consent receipt for the actor the SDK's own receipt was keyed on. In Mode A that is **always `anonymous_id`**, even when `UserId` is configured (v0.7's canonical keying), so a grant posted for `user_id` updates a different actor and leaves the anonymous denial as the server's last word. In Mode B it is the JWT's bound subject when one is configured — but a Mode-B client with no valid `UserId` records ANON-keyed receipts too, so restore those against `anonymous_id` as well to the same `POST {IngestUrl}/v1/consent` with a consent-write-capable **service** credential (a server-side ingest token — never ship one in a client build). Client-key consent writes consume ingest budget whether accepted or rejected. The **remote-config fetch** remains available while consent is `Unknown` or either denied flavor, using an identifier-free route with no targeting attributes or identified cache validator. Granted requests may carry the anonymous ID and, when opted in, targeting attributes. The dispatcher rechecks consent before creating the request; see [Remote config](#remote-config). Call from the Unity main thread.
 - **Consent result and forced-minor restriction:** every client and facade setter returns `ShardPilotResult`. Refused decisions have `Success = false` and `Error`; applied decisions have `Success = true`, no refusal error, and any unfinished work in `Warnings`. Persistence warnings do not reopen analytics after denial. A grant from ordinary `Denied` is refused with `spool_purge_failed` until the owed purge succeeds. Only recorded per-plane purge debt is retried: completed denial sweeps are not repeated during a grant, and event-only debt preserves the independent crash backlog. A shared grant refused or held by one scope records scope debt before returning. A persisted marker keeps that scope gated across restart until its own grant receipt is durable, while other scopes retain their grants. A failed marker write is logged and cannot guarantee the refusal across a process exit. An ordinary grant from `DeniedForcedMinor` always fails with `consent_forced_minor`, even after storage recovers; an ordinary denial succeeds without changing that state or creating a replacement receipt. The restriction is stored independently of the latest shared consent decision and persists across restart after receipt acknowledgment and marker retirement. Replaced clients consult it before accepting ordinary decisions. An unreadable or malformed restriction refuses grants with `consent_restriction_unreadable` until storage is readable again; analytics remains closed. With an invalid or overlong configured actor, denial succeeds with `consent_actor_invalid` and no receipt, while grant fails with that code. The restriction also applies when startup, shared-state refresh or healed storage restores a grant: analytics stays `Unknown` while stored denials retain their state. An omitted `AnonymousId` remains omitted through repeated normalization and allows the SDK to resolve its usual anonymous actor; an explicit blank value is invalid. Inspect `ConsentState` for the current decision; before initialization it is `Unknown`.
 
 - **Optional notice provenance:** both `ShardPilotSdk` and `ShardPilotClient` accept `SetConsent(bool analyticsGranted, ShardPilotConsentNotice? notice = null)` and `SetConsent(ShardPilotConsentDecision decision, ShardPilotConsentNotice? notice = null)`. Supply `new ShardPilotConsentNotice { NoticeVersion = "dialog-v2", NoticeLocale = "en-US", PolicyVersion = "privacy-v3" }` to record the identifiers shown for that decision. Omission keeps the existing behavior; a supplied empty struct is malformed. Version identifiers accept 1–64 ASCII characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `+`, `/`, `-`. Locale accepts 2–35 ASCII bytes of BCP 47 syntax, with duplicate variants and extension singletons refused; registry validity belongs to the server. A valid tuple is copied before return and retained unchanged in direct, propagated and late-scope receipts, retries and restart completion. The receipt sends all three top-level `notice_version`, `notice_locale`, `policy_version` fields or none; notice text is never accepted. A malformed grant fails with `Error = "consent_notice_invalid"` before applying or minting a receipt. A malformed ordinary or forced-minor denial still applies, omits the whole tuple and adds `consent_notice_invalid` to `Warnings`. Every simultaneous purge, state-persist, outbox-persist and actor warning remains in that collection. The forced-minor ordinary-denial no-op preserves its original receipt and tuple; notice cannot reverse an age restriction.
@@ -607,7 +670,9 @@ retry/idempotency behavior are unchanged. This wire change is included in `v0.12
 ## Offline durability
 
 The bounded in-memory analytics queue is backed by a durable on-disk spool.
-These rules cover admitted envelopes, including sealed experiment facts.
+These rules cover grant-admitted envelopes, including sealed experiment facts.
+Non-objection events remain memory-only, including after a later grant; overflow
+cannot spill them to disk and shutdown cannot make them durable.
 Raw experiment applications are memory-only until sealing and admission; a
 pause/quit snapshot does not journal them (see [Experiments](#experiments-dark-by-default)).
 
@@ -705,7 +770,7 @@ without a host pump; no additional wait, close owner or deadline is introduced.
 
 ### Android next-launch native crashes and ANRs
 
-**Unreleased (current source):** `NativeCrashExitInfoEnabled` and `AnrExitInfoEnabled` are separate opt-ins,
+**`0.14.0-alpha`:** `NativeCrashExitInfoEnabled` and `AnrExitInfoEnabled` are separate opt-ins,
 both **false** by default. On Android API 30+, the next SDK initialization
 reads the app's exit history and reports only the enabled reason. Configure
 `CrashUrl` and `CrashKey`, keep `CrashHooksEnabled = true`, and set the desired
@@ -765,7 +830,7 @@ In current source, a positive `Retry-After` on `429` or `5xx` also opens an in-m
 ## Experiments (dark by default)
 
 **Explicit application availability:** this flow was introduced in `0.11.0-alpha`;
-the examples below use the `0.13.0-alpha` scope API. Install its tag after
+the examples below use the `0.14.0-alpha` scope API. Install its tag after
 publication, or use UPM's local-package flow for the candidate. Before enabling it
 against a deployment, the owner must verify the assignment and application
 routes, publishable-key permission, and sealed-fact ingest support.

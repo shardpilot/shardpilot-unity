@@ -115,7 +115,6 @@ namespace ShardPilot
         /// per-scope owed-wipe markers), retried fail-closed before any
         /// era store construction in that directory.
         /// </summary>
-        internal const string SweepOwedMarkerKeyPrefix = "shardpilot.aei_era.sweep_owed.";
 
         /// <summary>
         /// Unix-millisecond bounds a persisted era timestamp must fall in
@@ -662,7 +661,11 @@ namespace ShardPilot
             }
         }
 
-        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
+        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log) =>
+            ShardPilotDirectorySweep.Sweep(markerStore, ShardPilotDirectorySweep.EraKey, directory,
+                owed => SweepDirectoryFiles(owed, markerStore, log));
+
+        private static bool SweepDirectoryFiles(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
         {
             var succeeded = true;
             try
@@ -727,32 +730,6 @@ namespace ShardPilot
             catch
             {
                 succeeded = false;
-            }
-
-            try
-            {
-                if (markerStore != null)
-                {
-                    var sweepKey = SweepOwedMarkerKey(directory);
-                    if (succeeded)
-                    {
-                        if (!string.IsNullOrEmpty(ShardPilotConfig.Trim(markerStore.Get(sweepKey))))
-                        {
-                            markerStore.Set(sweepKey, string.Empty);
-                        }
-                    }
-                    else
-                    {
-                        markerStore.Set(sweepKey, directory);
-                        SafeLog(log, "shardpilot anr era sweep could not complete; " +
-                                     "sweep owed — retried before any era store construction on a later launch");
-                    }
-                }
-            }
-            catch
-            {
-                // Best-effort marker maintenance; an uncleared marker only
-                // costs one redundant (idempotent) sweep on a later launch.
             }
 
             return succeeded;
@@ -843,58 +820,9 @@ namespace ShardPilot
             return hash;
         }
 
-        private static bool TrySettleOwedDirectorySweep(
-            string directory, IShardPilotKeyValueStore store, Action<string> log)
-        {
-            if (store == null || string.IsNullOrEmpty(directory))
-            {
-                return true;
-            }
-
-            string owedDirectory;
-            try
-            {
-                owedDirectory = ShardPilotConfig.Trim(store.Get(SweepOwedMarkerKey(directory)));
-            }
-            catch
-            {
-                // An unreadable store is a separate failure domain; fail
-                // open on the STORE — the sweep itself already ran
-                // best-effort when the marker was set. Mirrors the spool.
-                return true;
-            }
-
-            if (string.IsNullOrEmpty(owedDirectory))
-            {
-                return true;
-            }
-
-            return SweepDirectory(owedDirectory, store, log);
-        }
-
-        private static string SweepOwedMarkerKey(string directory)
-        {
-            return SweepOwedMarkerKeyPrefix + HashDirectory(directory);
-        }
-
-        /// <summary>
-        /// The same directory-key derivation the spool sweep markers use:
-        /// SHA-256 over the lowercased path, first 8 bytes as hex.
-        /// </summary>
-        private static string HashDirectory(string directory)
-        {
-            using (var sha = System.Security.Cryptography.SHA256.Create())
-            {
-                var digest = sha.ComputeHash(Encoding.UTF8.GetBytes(directory.ToLowerInvariant()));
-                var builder = new StringBuilder(16);
-                for (var i = 0; i < 8; i++)
-                {
-                    builder.Append(digest[i].ToString("x2", CultureInfo.InvariantCulture));
-                }
-
-                return builder.ToString();
-            }
-        }
+        private static bool TrySettleOwedDirectorySweep(string directory, IShardPilotKeyValueStore store, Action<string> log) =>
+            ShardPilotDirectorySweep.Retry(store, ShardPilotDirectorySweep.EraKey, directory,
+                owed => SweepDirectoryFiles(owed, store, log));
 
         // ------------------------------------------------------------------
         // Load + retention

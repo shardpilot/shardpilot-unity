@@ -154,7 +154,7 @@ namespace ShardPilot
             }
         }
 
-        private static bool SameCaseAlias(string held, string requested, out bool known)
+        internal static bool SameCaseAlias(string held, string requested, out bool known)
         {
             var suffix = ".alias-check." + Guid.NewGuid().ToString("N");
             var probe = held + suffix;

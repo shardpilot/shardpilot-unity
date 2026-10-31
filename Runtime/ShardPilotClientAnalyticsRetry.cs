@@ -157,7 +157,8 @@ namespace ShardPilot
                 RetryEventSpoolDebts();
                 lock (_gate)
                 {
-                    if (epoch.Value != _consentDenialEpoch || _consentState != ShardPilotConsentState.Granted)
+                    DropStaleBasisLocked(batch);
+                    if (epoch.Value != _consentDenialEpoch || !AnalyticsAdmittedLocked)
                         return false;
                 }
                 if (provenBeforeSend) RollbackAnalyticsAttempt(handoff, false);
@@ -170,7 +171,7 @@ namespace ShardPilot
                 lock (_gate)
                 {
                     handoff.SentCount = batch.Count;
-                    if (epoch.Value != _consentDenialEpoch || _consentState != ShardPilotConsentState.Granted)
+                    if (epoch.Value != _consentDenialEpoch || !AnalyticsAdmittedLocked)
                         return false;
                     if (batch.Count == 0) return false;
                     var now = ShardPilotAnalyticsClock.UnixMs(_utcNow());
@@ -192,7 +193,7 @@ namespace ShardPilot
                     // This fence durably supersedes any earlier correction
                     // before another attempt is allowed to become ambiguous.
                     foreach (var ev in batch) _analyticsRollbackDebt.Remove(ev.Id);
-                    if (epoch.Value != _consentDenialEpoch || _consentState != ShardPilotConsentState.Granted)
+                    if (epoch.Value != _consentDenialEpoch || !AnalyticsAdmittedLocked)
                         return false;
                     if (AnalyticsPreparationIsCurrent(batch, epoch))
                     {
@@ -211,11 +212,11 @@ namespace ShardPilot
         {
             lock (_gate)
             {
-                if (epoch.Value != _consentDenialEpoch || _consentState != ShardPilotConsentState.Granted)
+                if (epoch.Value != _consentDenialEpoch || !AnalyticsAdmittedLocked)
                     return false;
                 var now = ShardPilotAnalyticsClock.UnixMs(_utcNow());
                 foreach (var ev in batch)
-                    if (ev.AnalyticsClock == null || ev.AnalyticsClock.IsExpired(now)) return false;
+                    if (!BasisEventCurrentLocked(ev) || ev.AnalyticsClock == null || ev.AnalyticsClock.IsExpired(now)) return false;
                 return true;
             }
         }

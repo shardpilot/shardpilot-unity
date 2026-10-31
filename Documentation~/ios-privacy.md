@@ -66,6 +66,8 @@ The preview pre-initialization consent-policy API sends host-supplied scope, app
 locale, platform and optional store/age-band declarations without a user or device
 identifier. They do not initialize persistence or change consent. Every returned
 decision remains local and strict; no received policy enables collection.
+Response validation checks ambiguity, scope and expiry without authenticating a
+plan. Context invalidation changes only in-memory reply eligibility.
 
 ## Owner release test — NOT RUN
 

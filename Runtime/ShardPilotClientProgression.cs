@@ -197,7 +197,7 @@ namespace ShardPilot
                     return false;
                 }
 
-                if (_consentState != ShardPilotConsentState.Granted)
+                if (!TypedAnalyticsAdmittedLocked(eventName))
                 {
                     error = ShardPilotConsent.IsDeniedState(_consentState)
                         ? ShardPilotConsent.DeniedError
