@@ -65,7 +65,7 @@ namespace ShardPilot
         /// <summary>See <see cref="AppVersion"/>.</summary>
         public string BuildId;
 
-        /// <summary>"granted" | "denied" | "unknown" — the analytics consent state at era start.</summary>
+        /// <summary>The analytics consent state at era start, including forced-minor restriction.</summary>
         public string ConsentState;
 
         /// <summary>The crash plane's enabled state at era start (fail-closed: a read failure records false).</summary>
@@ -74,16 +74,15 @@ namespace ShardPilot
         /// <summary>
         /// True when a record from this era must be SETTLED WITHOUT
         /// reporting: the era's own posture already forbade collection —
-        /// analytics consent was denied (the denial suppresses crash too) or
+        /// forced-minor restriction applied or
         /// the crash plane was disabled when the era started. Honest limit,
         /// stated: a MID-era consent change is not re-snapshotted (the
         /// snapshot writer runs at SDK init only); the CURRENT-consent
-        /// upload gate still suppresses every report while an opt-out or
-        /// denial stands at the next launch.
+        /// upload gate also enforces current crash opt-out and forced-minor restrictions.
         /// </summary>
         public bool SuppressesReports
         {
-            get { return !CrashEnabled || ConsentState == "denied"; }
+            get { return !CrashEnabled || ConsentState == "forced_minor"; }
         }
     }
 
@@ -476,8 +475,8 @@ namespace ShardPilot
         /// <summary>
         /// Static suppression/revocation wipe for callers WITHOUT a live
         /// instance: the next-launch AEI pass when it observes a standing
-        /// opt-out/denial before ever constructing the store, and the
-        /// client's RUNTIME crash opt-out and consent-denial paths — which
+        /// crash block before constructing the store, and the client's
+        /// runtime crash opt-out and denial-transition paths — which
         /// call it at the same moment they clear the breadcrumb ring, so a
         /// revoked subject's era snapshots (anonymous id + consent posture)
         /// are destroyed IMMEDIATELY instead of surviving until a later
@@ -487,11 +486,8 @@ namespace ShardPilot
         /// marker that keeps the store disabled — fail closed — until a
         /// later launch removes it. Idempotent and cheap when no era file
         /// exists; runs file IO, so call it outside in-memory locks like
-        /// the spool wipes. Never throws. (A consent READ-FAILURE hold
-        /// deliberately does not call this: nothing is destroyed while the
-        /// stored decision is unknowable, and the identity-grant downgrade
-        /// mirrors the crash spool — which it also leaves in place.)
-        /// A consent DENIAL and the crash-plane OPT-OUT both additionally
+        /// the spool wipes. Never throws.
+        /// A denial transition and crash opt-out both additionally
         /// sweep every OTHER scope's era file in the directory via
         /// <see cref="WipeAllScopesAtResolvedDirectory"/>: both persisted
         /// decisions are GLOBAL single keys while era files are per-scope
@@ -552,9 +548,9 @@ namespace ShardPilot
         /// (<see cref="ShardPilotCrashSettings.StorageKey"/>, no scope
         /// suffix) — by the crash-plane OPT-OUT paths too; only the
         /// opt-out's SPOOL posture stays scope-local (it destroys no spools
-        /// anywhere). Each swept scope ALSO gets its AEI suppression floor
-        /// stamped, keyed by the scope hash from the swept filename: the
-        /// wipe alone destroys attribution but not the records Android
+        /// anywhere). A full sweep stamps each scope's exit floor. Ordinary
+        /// denial at startup can remove attribution without raising that floor.
+        /// The wipe alone destroys attribution but not the records Android
         /// retains, and an inactive scope re-initialized after a later
         /// re-grant/re-enable would otherwise report revoked-interval ANRs
         /// (device-scoped anonymous, but still disclaimed data). Only files
@@ -571,7 +567,8 @@ namespace ShardPilot
         public static void WipeAllScopesAtResolvedDirectory(
             ShardPilotConfig config,
             IShardPilotKeyValueStore markerStore,
-            Action<string> log)
+            Action<string> log,
+            bool stampSuppressionFloor = true)
         {
             try
             {
@@ -583,7 +580,10 @@ namespace ShardPilot
                     return;
                 }
 
-                SweepDirectory(directory, markerStore, log);
+                // A pending destructive sweep still owns its suppression floor.
+                var fullSweep = stampSuppressionFloor ||
+                    ShardPilotDirectorySweep.Owed(markerStore, ShardPilotDirectorySweep.EraKey, directory);
+                SweepDirectory(directory, markerStore, log, fullSweep);
             }
             catch
             {
@@ -661,11 +661,14 @@ namespace ShardPilot
             }
         }
 
-        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log) =>
+        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log,
+            bool stampSuppressionFloor) =>
             ShardPilotDirectorySweep.Sweep(markerStore, ShardPilotDirectorySweep.EraKey, directory,
-                owed => SweepDirectoryFiles(owed, markerStore, log));
+                owed => SweepDirectoryFiles(owed, markerStore, log),
+                owed => SweepDirectoryFiles(owed, markerStore, log, stampSuppressionFloor));
 
-        private static bool SweepDirectoryFiles(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
+        private static bool SweepDirectoryFiles(string directory, IShardPilotKeyValueStore markerStore, Action<string> log,
+            bool stampSuppressionFloor = true)
         {
             var succeeded = true;
             try
@@ -719,7 +722,8 @@ namespace ShardPilot
                         // Best-effort like every floor stamp: a lost marker
                         // write degrades to the live consent gate's
                         // suppression, never to a thrown sweep.
-                        ShardPilotAeiCursor.RecordSuppressionFloorForScopeHash(markerStore, pair.Key, nowUnixMs);
+                        if (stampSuppressionFloor)
+                            ShardPilotAeiCursor.RecordSuppressionFloorForScopeHash(markerStore, pair.Key, nowUnixMs);
                         if (!WipeFile(pair.Value, markerStore, WipeOwedMarkerKeyPrefix + pair.Key, log))
                         {
                             succeeded = false;
@@ -1006,16 +1010,17 @@ namespace ShardPilot
 
         private static string NormalizeConsent(string value)
         {
-            // Closed set; anything unrecognized reads as "denied" — the
-            // fail-closed direction for a value that decides suppression.
+            // Unrecognized states suppress collection rather than granting
+            // authority to a damaged snapshot.
             switch (value)
             {
                 case "granted":
                 case "unknown":
                 case "denied":
+                case "forced_minor":
                     return value;
                 default:
-                    return "denied";
+                    return "forced_minor";
             }
         }
 

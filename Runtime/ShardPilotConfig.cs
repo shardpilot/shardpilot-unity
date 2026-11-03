@@ -421,13 +421,11 @@ namespace ShardPilot
         /// persisted high-water cursor plus the deterministic
         /// <c>aei_record_key</c> idempotency field. Default FALSE; enable
         /// this opt-in before SDK initialization. Non-Android platforms
-        /// ignore the flag entirely. The lane rides the crash plane's
-        /// consent posture unchanged: the persisted crash opt-out and an
-        /// analytics-consent denial (including a forced-minor denial)
-        /// gate every report fail-closed, and
-        /// attribution follows the per-era snapshot rules (frozen to the era
-        /// subject; device-scoped anonymous when no snapshot covers the
-        /// record).
+        /// ignore the flag entirely. The crash opt-out, forced-minor denial,
+        /// and unreadable consent state block reporting. Ordinary analytics
+        /// denial permits eligible exits without analytics identifiers or
+        /// breadcrumbs. With explicit grant, attribution follows the per-era
+        /// snapshot rules and never borrows the current session's identity.
         /// </summary>
         public bool AnrExitInfoEnabled { get; set; }
 

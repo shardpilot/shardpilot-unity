@@ -471,8 +471,8 @@ namespace ShardPilot
             {
                 // Emitted from the RECOVERY heartbeat, i.e. on the main
                 // thread, through the client's full consent-gated capture
-                // path: the crash opt-out, the fail-closed read-failure
-                // hold, and an analytics-consent denial all refuse it there.
+                // path: crash opt-out, unreadable consent, and forced-minor
+                // denial block capture. Ordinary denial omits analytics context.
                 _client.CaptureCrash(BuildEvent(report, _eraId, DateTime.UtcNow));
             }
             catch

@@ -13,9 +13,9 @@ namespace ShardPilot
     /// (REASON_ANR behind the ANR flag; REASON_CRASH_NATIVE behind the
     /// native-crash flag), attributes each report from
     /// the MATCHING era snapshot, and ships through the client's existing
-    /// consent-gated crash capture — the write-ahead spool, the opt-out and
-    /// denial gates, and the fail-closed read-failure hold all apply
-    /// unchanged. A native record whose tombstone stream is present and
+    /// crash capture. The write-ahead spool, opt-out, forced-minor gate, and
+    /// consent read-failure hold all apply. Ordinary denial permits eligible
+    /// exits without analytics context. A native record whose tombstone stream is present and
     /// within the 4 MiB lane cap ships the RAW protobuf over the dedicated
     /// multipart tombstone lane instead (ack-gated — no spool ever holds
     /// dump-class bytes); its missing-stream and over-cap shapes degrade to
@@ -1096,7 +1096,7 @@ namespace ShardPilot
                     record.TimestampMs, record.Reason, record.Pid, record.DefiningUid),
                 RawText = degraded ? string.Empty : trace,
                 UseEraAttribution = true,
-                EraAnonymousId = era == null ? string.Empty : era.AnonymousId,
+                EraAnonymousId = era != null && era.ConsentState == "granted" ? era.AnonymousId : string.Empty,
                 // The CRASHED process's build, from the attributing era's
                 // snapshot — the exit predates this launch, so the current
                 // config's values would be wrong after an app update. No
@@ -1250,7 +1250,7 @@ namespace ShardPilot
                     record.TimestampMs, record.Reason, record.Pid, record.DefiningUid),
                 RawText = string.Empty,
                 UseEraAttribution = true,
-                EraAnonymousId = era == null ? string.Empty : era.AnonymousId,
+                EraAnonymousId = era != null && era.ConsentState == "granted" ? era.AnonymousId : string.Empty,
                 // The CRASHED process's build, from the attributing era's
                 // snapshot — empty (no era / pre-upgrade line) ships as
                 // unknown rather than borrowing this launch's config.

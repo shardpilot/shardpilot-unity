@@ -305,7 +305,8 @@ namespace ShardPilot
             writer.EndObject();
         }
 
-        public static string SerializeCrashIngest(ShardPilotConfig config, ShardPilotCrashEvent crash)
+        public static string SerializeCrashIngest(ShardPilotConfig config, ShardPilotCrashEvent crash,
+            bool includeAnalyticsContext)
         {
             var writer = new JsonWriter();
             writer.BeginObject();
@@ -432,7 +433,7 @@ namespace ShardPilot
 
             // breadcrumbs[] — each {name, timestamp}.
             var breadcrumbs = crash.Breadcrumbs;
-            if (breadcrumbs != null && breadcrumbs.Count > 0)
+            if (includeAnalyticsContext && breadcrumbs != null && breadcrumbs.Count > 0)
             {
                 writer.Name("breadcrumbs");
                 writer.BeginArray();
@@ -457,29 +458,7 @@ namespace ShardPilot
                 writer.EndArray();
             }
 
-            // anonymous_id is hashed at ingest into the canonical actor key (the
-            // per-subject key for consent + GDPR erasure); never stored raw.
-            // user_id is intentionally NOT sent: a self-asserted
-            // user_id never becomes the canonical actor under API-key auth and
-            // is stripped at ingest. session_id is hashed at ingest.
-            if (crash.UseEraAttribution)
-            {
-                // An ApplicationExitInfo-derived report is
-                // reported one-or-more launches AFTER the process era in
-                // which the exit occurred, so its attribution is FROZEN to
-                // that era's snapshot — never the config's CURRENT anonymous
-                // id (that would pin the crash to whoever is logged in at
-                // the next launch). Empty means the record is device-scoped
-                // anonymous: no actor field at all, borrowing no login. No
-                // session_id in either case: the era's session is unknowable
-                // at era start and the current session must not be borrowed.
-                writer.OptionalProperty("anonymous_id", crash.EraAnonymousId);
-            }
-            else
-            {
-                writer.OptionalProperty("anonymous_id", config.AnonymousId);
-                writer.OptionalProperty("session_id", crash.SessionId);
-            }
+            WriteCrashIdentity(writer, config, crash, includeAnalyticsContext);
 
             // Additive fields, all omitted when empty so every
             // pre-ANR crash body stays byte-identical: the event kind
@@ -511,7 +490,8 @@ namespace ShardPilot
         /// itself), and NO <c>kind</c> (native crash is the base
         /// <c>crash</c> kind — absent field — by construction).
         /// </summary>
-        public static string SerializeTombstoneMetadata(ShardPilotConfig config, ShardPilotCrashEvent crash)
+        public static string SerializeTombstoneMetadata(ShardPilotConfig config, ShardPilotCrashEvent crash,
+            bool includeAnalyticsContext)
         {
             var writer = new JsonWriter();
             writer.BeginObject();
@@ -565,10 +545,23 @@ namespace ShardPilot
             writer.OptionalProperty("reason", crash.ExceptionReason);
             writer.EndObject();
 
-            // Era-frozen attribution, exactly the AEI JSON rule:
-            // the era subject's anonymous id or NOTHING (device-scoped
-            // anonymous) — never the reporting launch's login, never a
-            // session id.
+            WriteCrashIdentity(writer, config, crash, includeAnalyticsContext);
+
+            // Carry the supplied OS-record key when present so the report
+            // retains its record identity on replay. This does not infer
+            // server deduplication or deployment readiness.
+            writer.OptionalProperty("aei_record_key", crash.AeiRecordKey);
+
+            writer.EndObject();
+            return writer.ToString();
+        }
+
+        private static void WriteCrashIdentity(JsonWriter writer, ShardPilotConfig config,
+            ShardPilotCrashEvent crash, bool includeAnalyticsContext)
+        {
+            if (!includeAnalyticsContext) return;
+            // Previous-process reports use only captured attribution, never
+            // the reporting launch's actor or session.
             if (crash.UseEraAttribution)
             {
                 writer.OptionalProperty("anonymous_id", crash.EraAnonymousId);
@@ -578,14 +571,6 @@ namespace ShardPilot
                 writer.OptionalProperty("anonymous_id", config.AnonymousId);
                 writer.OptionalProperty("session_id", crash.SessionId);
             }
-
-            // Carry the supplied OS-record key when present so the report
-            // retains its record identity on replay. This does not infer
-            // server deduplication or deployment readiness.
-            writer.OptionalProperty("aei_record_key", crash.AeiRecordKey);
-
-            writer.EndObject();
-            return writer.ToString();
         }
 
         public static string FormatTimestamp(DateTime timestamp)

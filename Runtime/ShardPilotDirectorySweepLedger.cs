@@ -76,13 +76,14 @@ namespace ShardPilot
             finally { _writer.Release(); }
         }
         internal Intent[] Read() => WithWriter(entries => entries.ToArray());
-        internal Intent Record(string directory) => WithWriter(entries =>
+        internal Intent Record(string directory) => RecordWithExisting(directory)?.Last();
+        internal Intent[] RecordWithExisting(string directory) => WithWriter(entries =>
         {
             var intent = new Intent(Guid.NewGuid().ToString("N"), Normalize(directory), _scope);
             var next = entries.Concat(new[] { intent }).ToArray(); var image = Encode(next);
             if (entries.Count >= 32 || Utf8.GetByteCount(image) > 65536)
             { _store.Set(_key, Encode(entries, true)); return null; }
-            _store.Set(_key, image); return intent;
+            _store.Set(_key, image); return next;
         });
         internal bool Retire(Intent[] captured) => WithWriter(entries =>
         {
@@ -106,12 +107,6 @@ namespace ShardPilot
         }
         private static bool Apply(Func<string, bool> sweep, string directory)
         { try { return sweep(directory); } catch { return false; } }
-        private static ShardPilotDirectorySweepLedger.Intent[] Capture(ShardPilotDirectorySweepLedger ledger, string directory)
-        {
-            var before = ledger.Read(); if (before == null) return null;
-            var created = ledger.Record(directory); if (created == null) return null;
-            return before.Where(e => e.Directory == created.Directory).Concat(new[] { created }).ToArray();
-        }
         private static bool Relevant(string owed, string directory)
         {
             if (owed == directory) return true;
@@ -126,14 +121,20 @@ namespace ShardPilot
             try { var entries = Open(store, key).Read(); return entries == null || entries.Any(e => Relevant(e.Directory, ShardPilotDirectorySweepLedger.Normalize(directory))); }
             catch { return true; }
         }
-        internal static bool Sweep(IShardPilotKeyValueStore store, string key, string directory, Func<string, bool> sweep)
+        internal static bool Sweep(IShardPilotKeyValueStore store, string key, string directory, Func<string, bool> sweep,
+            Func<string, bool> firstSweep = null)
         {
             if (store == null) return Apply(sweep, directory);
             ShardPilotDirectorySweepLedger ledger;
             try { ledger = Open(store, key); }
             catch { Apply(sweep, directory); return false; }
-            var captured = Capture(ledger, directory);
-            var complete = Apply(sweep, directory);
+            var next = ledger.RecordWithExisting(directory);
+            var intent = next?.Last();
+            var captured = intent == null ? null : next.Where(e => e.Directory == intent.Directory).ToArray();
+            // Possible aliases require full cleanup without granting retirement.
+            var fresh = firstSweep != null && intent != null &&
+                !next.Take(next.Length - 1).Any(e => Relevant(e.Directory, intent.Directory));
+            var complete = Apply(fresh ? firstSweep : sweep, directory);
             return complete && captured != null && ledger.Retire(captured);
         }
         internal static bool Retry(IShardPilotKeyValueStore store, string key, string directory,

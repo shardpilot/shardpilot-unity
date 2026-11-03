@@ -1030,9 +1030,9 @@ namespace ShardPilot
 
         /// <summary>
         /// A SEPARATE crash-plane hold raised when the analytics-consent
-        /// record was UNREADABLE at construction: the record may have been a
-        /// persisted denial (which suppresses crash capture), so the crash
-        /// plane stays closed regardless of the crash setting — including
+        /// record was unreadable at construction. It may record a forced-minor
+        /// restriction or a denial with cleanup still owed, so the crash plane
+        /// stays closed regardless of the crash setting, including
         /// through a later <see cref="SetCrashReportingEnabled"/>(true),
         /// which only governs the opt-out. Cleared by the next EXPLICIT
         /// consent decision (<see cref="SetConsent"/>, or one propagated
@@ -1058,13 +1058,14 @@ namespace ShardPilot
         private long _crashDisableEpoch;
 
         /// <summary>
-        /// The effective crash-plane gate: the opt-out setting AND the
-        /// consent-read-failure hold. Every collection/egress path gates on
-        /// this, not on the raw flag. Caller must hold <c>_gate</c>.
+        /// The effective crash-plane gate combines the opt-out setting,
+        /// the consent-read-failure hold and the forced-minor restriction.
+        /// Every collection and send path uses this gate. Caller must hold <c>_gate</c>.
         /// </summary>
         private bool CrashCollectionAllowedLocked
         {
-            get { return _crashReportingEnabled && !_consentReadFailureCrashHold; }
+            get { return _crashReportingEnabled && !_consentReadFailureCrashHold &&
+                         _consentState != ShardPilotConsentState.DeniedForcedMinor; }
         }
 
         /// <summary>
@@ -1887,9 +1888,8 @@ namespace ShardPilot
                     // launch judges the real slot. Non-granted restores
                     // are already fail-closed and stand. Unknown rather
                     // than a denied flavor: unity's denied boot branch
-                    // runs the DESTRUCTIVE denial wipes (spool, crash
-                    // spool, era snapshots), which unjudgeable evidence
-                    // must not trigger — Unknown closes egress identically
+                    // can purge spools and era snapshots, which unjudgeable
+                    // evidence must not trigger — Unknown closes egress identically
                     // under consent-first while preserving the data for
                     // the launch that can actually judge the slot.
                     _denialMarkerSlotUnjudgeable = true;
@@ -2533,11 +2533,13 @@ namespace ShardPilot
                     _spool.Wipe();
                 }
 
-                if (_crashSpool != null)
+                var keepUnattributedCrashes = _consentState == ShardPilotConsentState.Denied &&
+                    !consentReadFailed && !legacyAnonymousIdRejected;
+                var purgeOwnCrashSpool = _crashSpool != null && (!keepUnattributedCrashes ||
+                    _crashSpool.PendingRecords().Exists(record => ShardPilotJsonParser.CrashPayloadNeedsGrant(record.Payload)));
+                if (purgeOwnCrashSpool)
                 {
-                    // Crash reports carry the same consent subject
-                    // (anonymous_id, breadcrumbs): the denial destroys them too.
-                    _crashSpool.Wipe();
+                    _crashSpool?.Wipe();
                 }
 
                 // The consent decision is GLOBAL while spool files are
@@ -2555,24 +2557,27 @@ namespace ShardPilot
                 QuarantineSpoolIfSweepOwed(ShardPilotSpool.WipeAllScopesAtResolvedDirectory(
                     _config, _settingsStore, message => SafeLog("{0}", message)));
                 QuarantineCrashSpoolIfSweepOwed(ShardPilotCrashSpool.WipeAllScopesAtResolvedDirectory(
-                    _config, _settingsStore, message => SafeLog("{0}", message)));
+                    _config, _settingsStore, message => SafeLog("{0}", message), keepUnattributedCrashes));
                 ShardPilotAnrEraStore.WipeAllScopesAtResolvedDirectory(
-                    _config, _settingsStore, message => SafeLog("{0}", message));
+                    _config, _settingsStore, message => SafeLog("{0}", message),
+                    stampSuppressionFloor: !(keepUnattributedCrashes && _crashReportingEnabled && !_consentReadFailureCrashHold));
 
-                // The AEI suppression floor re-stamps here for the same
-                // kill-recovery reason the sweeps re-run: a process killed
-                // between the live denial's PersistConsentState and ITS
-                // RecordSuppressionFloor relaunches into this branch with
-                // the denial durable but the floor never stamped — a later
-                // re-grant plus a flag-on launch would then report ANR
-                // records Android retained from the denied window. Same
-                // marker semantics as the live path (forward-only max); a
-                // re-stamp on every denied launch merely extends the
-                // disclaimed window the standing denial already implies.
-                ShardPilotAeiCursor.RecordSuppressionFloor(
-                    _settingsStore, _config, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-
-                ShardPilotCrashSpool.ClearRetryAfterDeadline(_settingsStore, _config);
+                // A forced-minor relaunch still suppresses the entire exit
+                // window. Ordinary denial may report subsequent exits without
+                // borrowing a previous launch's analytics attribution.
+                if (_consentState == ShardPilotConsentState.DeniedForcedMinor)
+                {
+                    ShardPilotAeiCursor.RecordSuppressionFloor(
+                        _settingsStore, _config, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                }
+                if (keepUnattributedCrashes && !purgeOwnCrashSpool)
+                {
+                    _crashResendNotBefore = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config);
+                }
+                else
+                {
+                    ShardPilotCrashSpool.ClearRetryAfterDeadline(_settingsStore, _config);
+                }
             }
             else
             {
@@ -2673,14 +2678,11 @@ namespace ShardPilot
                 if (consentReadFailed)
                 {
                     // The UNREADABLE consent record may have been a DENIAL —
-                    // and a persisted denial suppresses crash capture and
-                    // wipes the crash spool (the anonymous_id is the
-                    // consent/erasure subject). Fail the crash plane closed
-                    // the same way: collection is suppressed for this session
-                    // (reason settings_read_failed — an explicit
-                    // SetCrashReportingEnabled(true) records a fresh, durable
-                    // decision) and the crash spool + its persisted
-                    // Retry-After are purged, because the wipe a denial would
+                    // and may have imposed a forced-minor restriction or
+                    // left crash cleanup owed. Fail the crash plane closed:
+                    // collection is held (settings_read_failed) until an
+                    // explicit SetConsent decision, and the crash spool and
+                    // persisted Retry-After are purged because the wipe a denial would
                     // have owed cannot be ruled out. A merely ABSENT consent
                     // record (fresh install) takes the normal
                     // legitimate-interest path below instead.
@@ -5763,18 +5765,11 @@ namespace ShardPilot
 
             long capturedDenialEpoch;
             long capturedCrashEpoch;
+            bool includeAnalyticsContext;
             lock (_gate)
             {
                 if (IntakeClosed)
                 {
-                    return false;
-                }
-
-                // A denied analytics-consent posture also suppresses crash
-                // diagnostics: the anonymous_id is the consent/erasure subject.
-                if (ShardPilotConsent.IsDeniedState(_consentState))
-                {
-                    _stats.RecordDropped(1);
                     return false;
                 }
 
@@ -5806,6 +5801,7 @@ namespace ShardPilot
                 // disable call that already returned promised no later
                 // collection of them.
                 capturedCrashEpoch = _crashDisableEpoch;
+                includeAnalyticsContext = _consentState == ShardPilotConsentState.Granted;
             }
 
             // FATAL crashes bypass sampling entirely (consistent across the
@@ -5822,7 +5818,8 @@ namespace ShardPilot
             ShardPilotCrashEvent prepared;
             try
             {
-                prepared = ShardPilotCrashSanitizer.Prepare(crashEvent, _breadcrumbs.Snapshot());
+                prepared = ShardPilotCrashSanitizer.Prepare(crashEvent,
+                    includeAnalyticsContext ? _breadcrumbs.Snapshot() : null);
                 // Freeze the classification and rate that admitted this report,
                 // before serialization and write-ahead persistence. Caller maps
                 // and a later client's config cannot supply these wire fields.
@@ -5866,7 +5863,7 @@ namespace ShardPilot
 
             lock (_gate)
             {
-                if (string.IsNullOrEmpty(prepared.SessionId))
+                if (includeAnalyticsContext && string.IsNullOrEmpty(prepared.SessionId))
                 {
                     prepared.SessionId = ShardPilotCrashSanitizer.SanitizeSessionId(_sessionState.Id);
                 }
@@ -5875,7 +5872,7 @@ namespace ShardPilot
             string payload;
             try
             {
-                payload = ShardPilotJson.SerializeCrashIngest(_config, prepared);
+                payload = ShardPilotJson.SerializeCrashIngest(_config, prepared, includeAnalyticsContext);
             }
             catch (Exception ex)
             {
@@ -5958,10 +5955,9 @@ namespace ShardPilot
                 // client's consent authority, and this displaced client is off
                 // the lifecycle registry — a denial recorded there between the
                 // handoff and this point never propagates back here. Ask the
-                // durable home directly: if it is denied NOW, its wipe already
-                // condemned the copy, and the live send below must not ship the
-                // denied subject's report either. Checked BEFORE the in-flight
-                // count below is taken, so this abort never leaves a pending
+                // durable home directly: a crash block or a loss of permission
+                // to send this payload's analytics context stops the live send.
+                // Check before counting in-flight work, so refusal never leaves a pending
                 // crash send that flush/close would wait out.
                 // Routing is derived from the CURRENT spool state, not from how
                 // the persist above ran: a replacement can land between an
@@ -5990,12 +5986,11 @@ namespace ShardPilot
                         // world as current.
                         long homeEpoch;
                         long homeCrashEpoch;
-                        if (!home.TrySnapshotConsentForDispatch(out homeEpoch, out homeCrashEpoch))
+                        if (!home.TrySnapshotConsentForDispatch(includeAnalyticsContext, out homeEpoch, out homeCrashEpoch))
                         {
-                            // The home refused (denied, crash plane disabled,
-                            // or a no-key home that could only lend an empty
-                            // credential): a denial's wipe already condemned
-                            // the handed-off durable copy (removal no-ops),
+                            // The home refused this payload's context, has a
+                            // crash block, or has no crash key. A denial transition
+                            // may have removed the handed-off durable copy,
                             // but a crash OPT-OUT deliberately keeps backlog —
                             // and must not keep the copy of a capture that is
                             // being rejected here, or it would re-send after a
@@ -6131,12 +6126,11 @@ namespace ShardPilot
                     {
                         long homeEpochNow;
                         long homeCrashEpochNow;
-                        if (!settleHome.TrySnapshotConsentForDispatch(out homeEpochNow, out homeCrashEpochNow) ||
+                        if (!settleHome.TrySnapshotConsentForDispatch(includeAnalyticsContext, out homeEpochNow, out homeCrashEpochNow) ||
                             homeEpochNow != settleEpoch || homeCrashEpochNow != settleCrashEpoch)
                         {
-                            // Denied, crash reporting disabled, or the world moved
-                            // (even a deny+re-grant): the capture is rejected, so its
-                            // durable copy must not outlive it. A denial's wipe
+                            // A payload context refusal, crash block, or moved epoch
+                            // rejects the capture and its durable copy. A denial's wipe
                             // already removed it (this removal no-ops), but an
                             // OPT-OUT keeps backlog by design — explicitly remove
                             // the rejected capture's record wherever it lives now.
@@ -6286,7 +6280,7 @@ namespace ShardPilot
         ///
         /// Consent is the DUMP-CLASS posture, evaluated on CURRENT state and
         /// fail-closed exactly like <c>CaptureCrash</c>'s entry gates: a
-        /// denied analytics consent, a crash-plane opt-out, an unreadable
+        /// forced-minor denial, a crash-plane opt-out, an unreadable
         /// settings state, or a missing crash key all refuse (return false —
         /// nothing leaves the device). There is NO durable write-ahead for
         /// tombstone bytes (raw dump-class bytes never touch the spool): the
@@ -6341,19 +6335,11 @@ namespace ShardPilot
 
             long capturedDenialEpoch;
             long capturedCrashEpoch;
+            bool includeAnalyticsContext;
             lock (_gate)
             {
                 if (_closed)
                 {
-                    return false;
-                }
-
-                // CURRENT-consent upload gate, fail-closed (the dump-class posture, same entry gates as CaptureCrash): a
-                // denied subject or a disabled/unreadable crash plane ships
-                // nothing.
-                if (ShardPilotConsent.IsDeniedState(_consentState))
-                {
-                    _stats.RecordDropped(1);
                     return false;
                 }
 
@@ -6365,6 +6351,7 @@ namespace ShardPilot
 
                 capturedDenialEpoch = _consentDenialEpoch;
                 capturedCrashEpoch = _crashDisableEpoch;
+                includeAnalyticsContext = _consentState == ShardPilotConsentState.Granted;
             }
 
             string metadataJson;
@@ -6391,7 +6378,7 @@ namespace ShardPilot
                     prepared.CrashId = ShardPilotIds.FromExitRecordKey(prepared.AeiRecordKey);
                 }
 
-                metadataJson = ShardPilotJson.SerializeTombstoneMetadata(_config, prepared);
+                metadataJson = ShardPilotJson.SerializeTombstoneMetadata(_config, prepared, includeAnalyticsContext);
             }
             catch (Exception ex)
             {
@@ -6588,11 +6575,10 @@ namespace ShardPilot
         /// a caller still holds this reference), the report is handed to the
         /// successor instead, under ITS consent gates — including when the
         /// disown lands mid-call and fails the own-spool append. Returns
-        /// false ONLY on a consent refusal: a denial raced the own-spool
-        /// persist (the just-written record is then removed again
-        /// fail-closed, escalating to the wipe when the removal cannot be
-        /// confirmed), or the successor holding the durable home is DENIED —
-        /// either way the caller must drop the capture, live send included.
+        /// false when a denial transition races persistence or the successor
+        /// refuses the payload's analytics context or crash dispatch. Remove
+        /// the rejected copy and drop the live send; escalate to a wipe when
+        /// removal cannot be confirmed.
         /// A disabled spool or a failed write returns true: durability is
         /// best-effort and must never block the live send.
         /// <paramref name="undoToken"/> carries the own-spool append's undo
@@ -6616,8 +6602,8 @@ namespace ShardPilot
             durability = ShardPilotCrashCaptureDurability.None;
 
             // A replaced client hands the report to its successor — a
-            // refusal is the successor chain's DENIED consent, crash
-            // opt-out, or missing crash key (a replaced client is off the
+            // refusal comes from disallowed analytics context, a blocked crash
+            // plane, or a missing crash key (a replaced client is off the
             // lifecycle registry and never receives propagated decisions
             // itself): the capture must abort its live send too, not just
             // lose the durable copy. This includes a replaced client that
@@ -6747,9 +6733,8 @@ namespace ShardPilot
                 {
                     if (!successor.AcceptCrashReportHandoff(records[i].Id, records[i].Payload))
                     {
-                        // The successor chain REFUSED (denied consent — its
-                        // wipe already condemned this scope's backlog —, a
-                        // crash opt-out, or a no-crash-key successor): stop
+                        // The successor refused this payload's analytics context,
+                        // has a crash block, or has no crash key. Stop
                         // forwarding rather than re-offering refused records.
                         return;
                     }
@@ -6771,8 +6756,8 @@ namespace ShardPilot
         /// re-initialization stays durable. Forwards down the (acyclic)
         /// succession chain when this client was itself displaced meanwhile.
         /// Returns false when the handoff must be REFUSED: this client's
-        /// consent posture is DENIED (at entry, or a denial raced the
-        /// append), its crash plane is opted out, or it was initialized
+        /// consent does not permit the payload's context, a denial raced the
+        /// append, its crash plane is blocked, or it was initialized
         /// without a <see cref="ShardPilotConfig.CrashKey"/>. The consent
         /// subject is the same scope the predecessor serves, but a replaced
         /// client is no longer in the lifecycle registry and never receives
@@ -6804,12 +6789,13 @@ namespace ShardPilot
             // no handoff append can land afterwards, and a fatal crash mid-
             // append cannot strand a record behind a completed opt-out (the
             // blocked disable never returned).
+            var needsGrant = ShardPilotJsonParser.CrashPayloadNeedsGrant(payload);
             lock (_crashDispatchGate)
             {
                 // The consent gate comes BEFORE the no-spool early-out: a
                 // successor that runs without a crash spool (disabled, or no
-                // crash key) but has DENIED consent must still refuse the
-                // handoff — the refusal is what aborts the stale predecessor's
+                // crash key) must still refuse a handoff that would carry
+                // disallowed context — the refusal is what aborts the stale predecessor's
                 // live send, and that predecessor never receives propagated
                 // denials itself. The successor's crash opt-out refuses for the
                 // same reason: it is the live authority for the crash plane, so
@@ -6819,7 +6805,8 @@ namespace ShardPilot
                 long crashEpochBefore;
                 lock (_gate)
                 {
-                    if (ShardPilotConsent.IsDeniedState(_consentState) || !CrashCollectionAllowedLocked)
+                    if (!CrashCollectionAllowedLocked ||
+                        (needsGrant && _consentState != ShardPilotConsentState.Granted))
                     {
                         return false;
                     }
@@ -7088,7 +7075,7 @@ namespace ShardPilot
         {
             lock (_gate)
             {
-                if (ShardPilotConsent.IsDeniedState(_consentState) || _consentDenialEpoch != epochAtSend ||
+                if (_consentState == ShardPilotConsentState.DeniedForcedMinor || _consentDenialEpoch != epochAtSend ||
                     (crashDisableEpochAtSend != CrashDisableEpochUnguarded &&
                      _crashDisableEpoch != crashDisableEpochAtSend))
                 {
@@ -7143,7 +7130,7 @@ namespace ShardPilot
             var condemnedMeanwhile = false;
             lock (_gate)
             {
-                if (ShardPilotConsent.IsDeniedState(_consentState) || _consentDenialEpoch != epochAtSend ||
+                if (_consentState == ShardPilotConsentState.DeniedForcedMinor || _consentDenialEpoch != epochAtSend ||
                     (crashDisableEpochAtSend != CrashDisableEpochUnguarded &&
                      _crashDisableEpoch != crashDisableEpochAtSend))
                 {
@@ -7199,13 +7186,12 @@ namespace ShardPilot
 
         /// <summary>
         /// Atomically snapshots this client's consent world for a CRASH
-        /// dispatch decision: false when analytics consent is DENIED or the
-        /// crash plane's own opt-out is in force (the dispatch must be
-        /// dropped); true otherwise, with the denial epoch read in the SAME
+        /// dispatch decision: requires a crash key, open crash plane, and
+        /// explicit grant for context-bearing payloads. Read the epochs in the same
         /// lock hold — so a verdict can never be paired with an epoch from
         /// a different consent world.
         /// </summary>
-        private bool TrySnapshotConsentForDispatch(out long epoch, out long crashEpoch)
+        private bool TrySnapshotConsentForDispatch(bool needsGrant, out long epoch, out long crashEpoch)
         {
             lock (_gate)
             {
@@ -7219,8 +7205,8 @@ namespace ShardPilot
                 // cannot: a no-key successor registering after the
                 // predecessor's own-spool append but before this snapshot
                 // becomes the durable home without any handoff call.
-                return !ShardPilotConsent.IsDeniedState(_consentState)
-                    && CrashCollectionAllowedLocked
+                return CrashCollectionAllowedLocked
+                    && (!needsGrant || _consentState == ShardPilotConsentState.Granted)
                     && !string.IsNullOrEmpty(_config.CrashKey);
             }
         }
@@ -7437,13 +7423,9 @@ namespace ShardPilot
             long epoch;
             lock (_gate)
             {
-                // The crash opt-out gates the re-send pass exactly like a
-                // denial does: while disabled, the pending backlog is not
-                // re-sent (it stays durable and ages out under the spool's
-                // retention window; entries captured while enabled re-send
-                // only if re-enabled within it).
-                if (_closed || _crashResendActive || ShardPilotConsent.IsDeniedState(_consentState) ||
-                    !CrashCollectionAllowedLocked)
+                // A blocked crash plane cannot replay. Ordinary denial still
+                // allows replay of verified identifier-free reports.
+                if (_closed || _crashResendActive || !CrashCollectionAllowedLocked)
                 {
                     return;
                 }
@@ -7530,8 +7512,7 @@ namespace ShardPilot
             DateTime notBefore;
             lock (_gate)
             {
-                if (_closed || _crashResendActive || ShardPilotConsent.IsDeniedState(_consentState) ||
-                    !CrashCollectionAllowedLocked)
+                if (_closed || _crashResendActive || !CrashCollectionAllowedLocked)
                 {
                     return wait;
                 }
@@ -7620,6 +7601,7 @@ namespace ShardPilot
                 return;
             }
 
+            var needsGrant = ShardPilotJsonParser.CrashPayloadNeedsGrant(replayPayload);
             // Built BEFORE the consent/close recheck, so the recheck-to-
             // dispatch window is as small as it can be without IO under the
             // lock. Only the retired root source key is renamed; the
@@ -7645,6 +7627,7 @@ namespace ShardPilot
                 // on its way is enforced server-side (the ingest service
                 // suppresses storage for a denied subject), the same residual
                 // window the analytics publish path documents.
+                bool withholdContext;
                 lock (_gate)
                 {
                     if (_closed || epoch != _consentDenialEpoch || !CrashCollectionAllowedLocked)
@@ -7658,7 +7641,14 @@ namespace ShardPilot
                         return;
                     }
 
-                    Interlocked.Increment(ref _pendingCrashSends);
+                    withholdContext = needsGrant && _consentState != ShardPilotConsentState.Granted;
+                    if (!withholdContext) Interlocked.Increment(ref _pendingCrashSends);
+                }
+
+                if (withholdContext)
+                {
+                    SendCrashResendStep(records, index + 1, epoch);
+                    return;
                 }
 
                 try
@@ -7947,6 +7937,16 @@ namespace ShardPilot
             get { return _config.AnonymousId; }
         }
 
+        internal string SnapshotCrashEraActor(out ShardPilotConsentState consent)
+        {
+            lock (_gate)
+            {
+                consent = _consentState;
+                return consent == ShardPilotConsentState.Granted && CrashCollectionAllowedLocked
+                    ? _config.AnonymousId : string.Empty;
+            }
+        }
+
         /// <summary>
         /// The normalized config, for the crash-plane capture lanes wired at
         /// hook-install time (the ANR lane reads its static
@@ -7979,9 +7979,8 @@ namespace ShardPilot
         /// <see cref="ShardPilotCrashSettings.NotConfiguredReason"/> when the
         /// client has no <see cref="ShardPilotConfig.CrashKey"/> (crash
         /// reporting is off by configuration — no capture is ever possible),
-        /// <see cref="ShardPilotConsent.DeniedError"/> while analytics
-        /// consent is explicitly DENIED (a denial suppresses crash capture
-        /// too), <see cref="ShardPilotCrashSettings.OptOutReason"/> for an
+        /// <see cref="ShardPilotConsent.DeniedError"/> while a
+        /// forced-minor denial is active, <see cref="ShardPilotCrashSettings.OptOutReason"/> for an
         /// explicit opt-out, or
         /// <see cref="ShardPilotCrashSettings.ReadFailedReason"/> when the
         /// persisted setting could not be read or was malformed — all fail
@@ -8002,12 +8001,7 @@ namespace ShardPilot
 
             lock (_gate)
             {
-                // A DENIED analytics consent suppresses crash capture too
-                // (the anonymous_id is the consent/erasure subject): every
-                // CaptureCrash is dropped in this state, so the status API
-                // must not claim collection is active. Lifts with the next
-                // explicit grant.
-                if (ShardPilotConsent.IsDeniedState(_consentState))
+                if (_consentState == ShardPilotConsentState.DeniedForcedMinor)
                 {
                     disabledReason = ShardPilotConsent.DeniedError;
                     return false;
@@ -8476,6 +8470,7 @@ namespace ShardPilot
 
             var cleared = 0;
             var previousConsentState = ShardPilotConsentState.Unknown;
+            var purgeCrashState = false;
             lock (_gate)
             {
                 if (_workerStopped || IntakeClosed)
@@ -8518,6 +8513,7 @@ namespace ShardPilot
                 // raise below: only a REAL transition TO granted ends a
                 // dark denied window.
                 previousConsentState = _consentState;
+                purgeCrashState = !analyticsGranted && DenialNeedsCrashCleanupLocked(state);
                 _consentOutbox.AuthorizeExplicitDecisionReplacement();
 
                 ApplyConsentState(state);
@@ -8663,7 +8659,7 @@ namespace ShardPilot
                     // Advancing the denial epoch invalidates every event the
                     // worker drained before this point: the worker discards
                     // its held batch when it sees the epoch move.
-                    AdvanceConsentDenialEpochLocked();
+                    if (purgeCrashState) AdvanceConsentDenialEpochLocked();
                     cleared = _queue.Count + _restoredPending.Count + _spooledOverflowIds.Count;
                     _queue.Clear();
                     _restoredPending.Clear();
@@ -8798,16 +8794,7 @@ namespace ShardPilot
                     SyncOwedDenialWitnessLocked(freshDecision: true);
                 }
 
-                // Synchronize with any in-flight crash dispatch, exactly like
-                // the crash opt-out: the final recheck and the sender handoff
-                // run under this gate, so acquiring it here means that when
-                // this denial returns, a concurrent capture has either
-                // already handed its bytes to the transport or will observe
-                // the advanced denial epoch and refuse — no crash bytes can
-                // START leaving the device after the denial call completed.
-                lock (_crashDispatchGate)
-                {
-                }
+                if (purgeCrashState) PurgeDeniedCrashScope();
 
                 // A denial also destroys the on-disk spool: previously
                 // undeliverable events must never be re-sent on a later
@@ -8820,56 +8807,9 @@ namespace ShardPilot
                     _spool.Wipe();
                 }
 
-                // The crash spool carries the same consent subject
-                // (anonymous_id, breadcrumbs): the denial destroys it too,
-                // with the same fail-closed owed-marker semantics, and the
-                // persisted crash Retry-After deadline goes with it — the
-                // in-memory re-send deadline included, so post-re-grant
-                // reports are not held behind backpressure that belonged to
-                // the condemned backlog.
-                if (_crashSpool != null)
-                {
-                    _crashSpool.Wipe();
-                }
-
-                ShardPilotCrashSpool.ClearRetryAfterDeadline(_settingsStore, _config);
-                lock (_gate)
-                {
-                    _crashResendNotBefore = DateTime.MinValue;
-                }
-
-                // The ANR era snapshots carry the same consent subject
-                // (anonymous id at era start): the denial destroys this
-                // scope's too, immediately — parity with the breadcrumb
-                // clear above and the crash-spool wipe — under the era
-                // store's own fail-closed owed-marker rule. Other live
-                // scopes wipe their own in the propagation below.
-                ShardPilotAnrEraStore.WipeScope(_config, _settingsStore, message => SafeLog("{0}", message));
-
-                // And this scope's AEI suppression floor (plain KV, no AEI
-                // read): a dark ANR lane cannot floor its cursor now, and a
-                // denied-period ANR record must never report after a later
-                // re-grant.
-                ShardPilotAeiCursor.RecordSuppressionFloor(
-                    _settingsStore, _config, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-
-                // The consent decision is GLOBAL while spool files are
-                // per-scope: the denial must also reach EVERY other scope's
-                // file in the active directory (and any leftover when no live
-                // spool exists this run), fail-closed per file. Files under a
-                // DIFFERENT custom SpoolDir from an earlier run are out
-                // of reach — keep SpoolDir stable. The crash spool's
-                // sweep mirrors the event sweep with its own markers, and
-                // the ANR era sweep mirrors both: an INACTIVE scope's era
-                // snapshot left behind would attribute historical ANRs with
-                // the pre-denial anonymous id after a later re-grant
-                // initializes that scope.
                 QuarantineSpoolIfSweepOwed(ShardPilotSpool.WipeAllScopesAtResolvedDirectory(
                     _config, _settingsStore, message => SafeLog("{0}", message)));
-                QuarantineCrashSpoolIfSweepOwed(ShardPilotCrashSpool.WipeAllScopesAtResolvedDirectory(
-                    _config, _settingsStore, message => SafeLog("{0}", message)));
-                ShardPilotAnrEraStore.WipeAllScopesAtResolvedDirectory(
-                    _config, _settingsStore, message => SafeLog("{0}", message));
+                if (purgeCrashState) SweepDeniedCrashDirectory();
 
                 // And to every LIVE registered client: their persisted state
                 // is this same global key, but their in-memory pre-denial
@@ -8891,7 +8831,7 @@ namespace ShardPilot
                 // its retries heal the shared record — instead of pruning
                 // the denial's only durable evidence.
                 ShardPilotDispatcher.PropagateConsentDenial(
-                    this, ShardPilotSpool.ResolveDirectory(_config), state, decidedAtUtc,
+                    this, purgeCrashState ? ShardPilotSpool.ResolveDirectory(_config) : null, state, decidedAtUtc,
                     deciderRecordPersisted: statePersisted,
                     deciderMarkerDurable: denialMarkerDurable,
                     deciderMarkerActor: _config.AnonymousId,
@@ -8903,10 +8843,8 @@ namespace ShardPilot
             }
             else
             {
-                // A re-grant ends any dark denied window for the AEI
-                // suppression floor, exactly like a crash re-enable ends an
-                // opted-out one: raise a standing marker to now (plain KV;
-                // no ordering dependency on the receipt machinery below).
+                // A transition to grant raises a standing AEI floor, like
+                // crash re-enable. It does not depend on receipt ordering.
                 // Gated on the REAL transition to granted, mirroring the
                 // crash setter: a repeated grant while already granted must
                 // not move a still-standing marker over ANRs that happened
@@ -14251,6 +14189,29 @@ namespace ShardPilot
             return appended ? PersistOutcome.Durable : PersistOutcome.Failed;
         }
 
+        // Caller holds _gate before applying a valid denial.
+        private bool DenialNeedsCrashCleanupLocked(ShardPilotConsentState next) =>
+            _consentState != next || _consentReadFailureCrashHold;
+
+        private void PurgeDeniedCrashScope()
+        {
+            // Fence transport handoff before erasing the newly condemned state.
+            lock (_crashDispatchGate) { }
+            _crashSpool?.Wipe();
+            ShardPilotCrashSpool.ClearRetryAfterDeadline(_settingsStore, _config);
+            lock (_gate) { _crashResendNotBefore = DateTime.MinValue; }
+            ShardPilotAnrEraStore.WipeScope(_config, _settingsStore, message => SafeLog("{0}", message));
+            ShardPilotAeiCursor.RecordSuppressionFloor(_settingsStore, _config, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        }
+
+        private void SweepDeniedCrashDirectory()
+        {
+            QuarantineCrashSpoolIfSweepOwed(ShardPilotCrashSpool.WipeAllScopesAtResolvedDirectory(
+                _config, _settingsStore, message => SafeLog("{0}", message)));
+            ShardPilotAnrEraStore.WipeAllScopesAtResolvedDirectory(
+                _config, _settingsStore, message => SafeLog("{0}", message));
+        }
+
         /// <summary>
         /// Applies a GLOBALLY decided consent denial to this client (invoked
         /// by the lifecycle registry when another client records the denial):
@@ -14324,7 +14285,7 @@ namespace ShardPilot
             var alreadyDenied = false;
             lock (_gate)
             {
-                alreadyDenied = ShardPilotConsent.IsDeniedState(_consentState);
+                alreadyDenied = !DenialNeedsCrashCleanupLocked(deniedState);
                 ApplyConsentState(deniedState);
                 if (decidedAtUtc.HasValue)
                 {
@@ -14484,7 +14445,7 @@ namespace ShardPilot
 
             if (alreadyDenied)
             {
-                // Already denied — maximally fail-closed, wipes done; the
+                // This denial does not tighten the restriction; the
                 // state converged on the propagated flavor and the new
                 // explicit decision's receipt (if any) was appended and is
                 // delivering.
@@ -14496,42 +14457,8 @@ namespace ShardPilot
                 _stats.RecordDropped(cleared);
             }
 
-            // Same dispatch-gate synchronization as the initiating denial: a
-            // propagated denial must not return to the deciding caller while
-            // this client can still start a crash send under the condemned
-            // epoch.
-            lock (_crashDispatchGate)
-            {
-            }
-
-            if (_spool != null)
-            {
-                _spool.Wipe();
-            }
-
-            if (_crashSpool != null)
-            {
-                _crashSpool.Wipe();
-            }
-
-            // The crash Retry-After marker is scope-keyed, so each propagated
-            // client clears its own — the in-memory re-send deadline too,
-            // matching the initiator's denial path.
-            ShardPilotCrashSpool.ClearRetryAfterDeadline(_settingsStore, _config);
-            lock (_gate)
-            {
-                _crashResendNotBefore = DateTime.MinValue;
-            }
-
-            // The ANR era snapshots are scope-keyed like the Retry-After
-            // marker: each propagated client wipes its own scope's,
-            // matching the initiating denial path (fail-closed owed marker
-            // when the file cannot be confirmed gone) — and stamps its own
-            // scope's AEI suppression floor for the same reason the
-            // initiator does.
-            ShardPilotAnrEraStore.WipeScope(_config, _settingsStore, message => SafeLog("{0}", message));
-            ShardPilotAeiCursor.RecordSuppressionFloor(
-                _settingsStore, _config, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            PurgeDeniedCrashScope();
+            _spool?.Wipe();
 
             // The initiator swept ITS directory, but this client's resolved
             // directory can differ (a custom SpoolDir) and may hold
@@ -14546,15 +14473,7 @@ namespace ShardPilot
             {
                 QuarantineSpoolIfSweepOwed(ShardPilotSpool.WipeAllScopesAtResolvedDirectory(
                     _config, _settingsStore, message => SafeLog("{0}", message)));
-                QuarantineCrashSpoolIfSweepOwed(ShardPilotCrashSpool.WipeAllScopesAtResolvedDirectory(
-                    _config, _settingsStore, message => SafeLog("{0}", message)));
-
-                // The initiator's era sweep (which it runs alongside ITS
-                // spool sweeps) never reached this different directory —
-                // sweep the sibling-scope era files here too, or an
-                // inactive scope's snapshot would survive the denial.
-                ShardPilotAnrEraStore.WipeAllScopesAtResolvedDirectory(
-                    _config, _settingsStore, message => SafeLog("{0}", message));
+                SweepDeniedCrashDirectory();
             }
             else if (!string.IsNullOrEmpty(ownDirectory))
             {
@@ -15004,10 +14923,8 @@ namespace ShardPilot
                 return false;
             }
 
-            // The propagated re-grant ends any dark denied window for this
-            // scope's AEI suppression floor, like the deciding client's own
-            // grant path (plain KV, outside _gate) — and transition-gated
-            // like it too (see wasGranted above).
+            // A propagated transition to grant raises a standing AEI floor,
+            // just like a grant made on this client.
             if (!wasGranted)
             {
                 var reGrantNowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -15188,10 +15105,9 @@ namespace ShardPilot
         /// accounting are dropped and the spools purged exactly as a
         /// construction-time read failure purges them, and the crash plane
         /// raises the consent-read-failure hold (lifted only by the next
-        /// explicit consent decision). An already-denied client keeps its
-        /// denial — that state is maximally fail-closed already, and its
-        /// wipes have run. Idempotent for a client already holding the
-        /// read-failure posture.
+        /// explicit consent decision). A known ordinary denial stays in
+        /// effect while the crash hold is raised. Forced-minor clients and
+        /// clients already holding the read-failure posture stay blocked.
         /// </summary>
         private void ApplyConsentReadFailureFailClosed()
         {
@@ -15199,13 +15115,16 @@ namespace ShardPilot
             lock (_gate)
             {
                 if (_closed ||
-                    ShardPilotConsent.IsDeniedState(_consentState) ||
-                    (_consentReadFailureCrashHold && _consentState == ShardPilotConsentState.Unknown))
+                    _consentState == ShardPilotConsentState.DeniedForcedMinor ||
+                    _consentReadFailureCrashHold)
                 {
                     return;
                 }
 
-                ApplyConsentState(ShardPilotConsentState.Unknown);
+                if (_consentState != ShardPilotConsentState.Denied)
+                {
+                    ApplyConsentState(ShardPilotConsentState.Unknown);
+                }
 
                 // Advancing the denial epoch invalidates whatever the worker
                 // drained under the stale grant; advancing the crash epoch

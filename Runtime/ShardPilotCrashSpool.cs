@@ -863,10 +863,10 @@ namespace ShardPilot
 
         /// <summary>
         /// Destroys the crash spool: clears every record and deletes the
-        /// file. Used when analytics consent is denied — a crash report
-        /// carries the same consent subject (anonymous_id, breadcrumbs) as
-        /// the events, so previously undeliverable reports must never be
-        /// re-sent on a later launch. FAIL-CLOSED, mirroring the event
+        /// file. A denial transition wipes pre-decision crash state;
+        /// forced-minor denial blocks new reports, while ordinary denial
+        /// can admit new reports without analytics context. FAIL-CLOSED,
+        /// mirroring the event
         /// spool: when the file cannot be durably removed, a per-scope
         /// "wipe owed" marker is persisted and this instance is tombstoned;
         /// the next construction retries the wipe BEFORE any load and keeps
@@ -930,7 +930,7 @@ namespace ShardPilot
         public static bool WipeAllScopesAtResolvedDirectory(
             ShardPilotConfig config,
             IShardPilotKeyValueStore markerStore,
-            Action<string> log)
+            Action<string> log, bool keepUnattributed = false)
         {
             try
             {
@@ -942,7 +942,13 @@ namespace ShardPilot
                     return true;
                 }
 
-                return SweepDirectory(directory, markerStore, log);
+                // Existing wipe obligations always run the full sweep. A
+                // known ordinary denial can retain only complete files whose
+                // records are all positively established as unattributed.
+                var retainLimit = keepUnattributed &&
+                    !ShardPilotDirectorySweep.Owed(markerStore, ShardPilotDirectorySweep.CrashKey, directory)
+                    ? long.MaxValue : 0L;
+                return SweepDirectory(directory, markerStore, log, retainLimit);
             }
             catch
             {
@@ -1587,11 +1593,67 @@ namespace ShardPilot
             ShardPilotDirectorySweep.Retry(store, ShardPilotDirectorySweep.CrashKey, directory,
                 owed => SweepDirectoryFiles(owed, store, log));
 
-        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log) =>
+        private static bool SweepDirectory(string directory, IShardPilotKeyValueStore markerStore, Action<string> log,
+            long retainLimit) =>
             ShardPilotDirectorySweep.Sweep(markerStore, ShardPilotDirectorySweep.CrashKey, directory,
-                owed => SweepDirectoryFiles(owed, markerStore, log));
+                owed => SweepDirectoryFiles(owed, markerStore, log),
+                owed => SweepDirectoryFiles(owed, markerStore, log, retainLimit));
 
-        private static bool SweepDirectoryFiles(string directory, IShardPilotKeyValueStore markerStore, Action<string> log)
+        private static bool IsUnattributedFile(string path, long retainLimit,
+            IShardPilotKeyValueStore store, string markerKey)
+        {
+            if (retainLimit <= 0 || store == null) return false;
+            try
+            {
+                if (!string.IsNullOrEmpty(ShardPilotConfig.Trim(store.Get(markerKey)))) return false;
+                using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var reader = new StreamReader(file, new UTF8Encoding(false, true)))
+                {
+                    // SDK writes replace whole files. The opened generation's byte
+                    // length bounds its decoded characters without capping its records.
+                    var remaining = Math.Min(file.Length, retainLimit);
+                    if (ReadRetentionLine(reader, ref remaining) != HeaderLine) return false;
+                    var hasRecord = false;
+                    string line;
+                    while ((line = ReadRetentionLine(reader, ref remaining)) != null)
+                    {
+                        if (line.Length == 0) continue;
+                        if (ShardPilotJsonParser.CrashPayloadNeedsGrant(line)) return false;
+                        hasRecord = true;
+                    }
+                    return hasRecord;
+                }
+            }
+            catch { return false; }
+        }
+
+        private static int ReadRetentionChar(TextReader reader, ref long remaining)
+        {
+            var value = reader.Read();
+            if (value != -1 && remaining-- <= 0)
+                throw new InvalidDataException("Crash spool grew during validation.");
+            return value;
+        }
+
+        private static string ReadRetentionLine(TextReader reader, ref long remaining)
+        {
+            var line = new StringBuilder();
+            int value;
+            while ((value = ReadRetentionChar(reader, ref remaining)) != -1)
+            {
+                if (value == '\n') return line.ToString();
+                if (value == '\r')
+                {
+                    if (reader.Peek() == '\n') ReadRetentionChar(reader, ref remaining);
+                    return line.ToString();
+                }
+                line.Append((char)value);
+            }
+            return line.Length == 0 ? null : line.ToString();
+        }
+
+        private static bool SweepDirectoryFiles(string directory, IShardPilotKeyValueStore markerStore, Action<string> log,
+            long retainLimit = 0)
         {
             var succeeded = true;
             try
@@ -1608,6 +1670,7 @@ namespace ShardPilot
 
                 if (succeeded && exists)
                 {
+                    var retainedLiveScopes = new HashSet<string>(StringComparer.Ordinal);
                     string[] files = null;
                     try
                     {
@@ -1637,6 +1700,11 @@ namespace ShardPilot
                             }
 
                             var markerKey = WipeOwedMarkerKeyPrefix + scopeHash;
+                            if (IsUnattributedFile(files[i], retainLimit, markerStore, markerKey))
+                            {
+                                retainedLiveScopes.Add(scopeHash);
+                                continue;
+                            }
                             if (TryDeleteSpoolFile(files[i]))
                             {
                                 ClearWipeOwedIfSatisfied(markerStore, markerKey, files[i]);
@@ -1696,6 +1764,8 @@ namespace ShardPilot
                                 continue;
                             }
 
+                            if (IsUnattributedFile(tempFiles[i], retainLimit, markerStore,
+                                WipeOwedMarkerKeyPrefix + scopeHash)) continue;
                             if (!TryDeleteFileConfirmed(tempFiles[i]))
                             {
                                 succeeded = false;
@@ -1717,7 +1787,8 @@ namespace ShardPilot
                                              "wipe owed — retried before any load on a later launch");
                             }
 
-                            ClearRetryAfterMarkerForScope(markerStore, scopeHash);
+                            if (!retainedLiveScopes.Contains(scopeHash))
+                                ClearRetryAfterMarkerForScope(markerStore, scopeHash);
                         }
                     }
                 }

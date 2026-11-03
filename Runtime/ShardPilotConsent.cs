@@ -19,13 +19,12 @@ namespace ShardPilot
         Denied = 2,
 
         /// <summary>
-        /// An age-gate-forced denial: analytics-wise IDENTICAL to
-        /// <see cref="Denied"/> — every gate treats both as the same denied
-        /// state and refusals report the same <c>consent_denied</c> reason.
-        /// The only difference is on the consent receipt, which carries
-        /// <c>reason = "denied_forced_minor"</c> so the backend can tell a
-        /// band-forced denial from a chosen one. Persisted and reloaded as
-        /// its own state; ordinary decisions cannot remove the restriction.
+        /// An age-gate-forced denial. Analytics is blocked as with
+        /// <see cref="Denied"/>. Forced-minor denial also blocks crash capture
+        /// and purges pending crash state; ordinary denial permits reports
+        /// without analytics context. The consent receipt carries
+        /// <c>reason = "denied_forced_minor"</c>, and ordinary decisions
+        /// cannot remove the persisted restriction.
         /// </summary>
         DeniedForcedMinor = 3
     }
@@ -446,9 +445,8 @@ namespace ShardPilot
 #endif
 
         /// <summary>
-        /// True for both denied flavors: every analytics/crash gate treats
-        /// <see cref="ShardPilotConsentState.DeniedForcedMinor"/> exactly
-        /// like <see cref="ShardPilotConsentState.Denied"/>.
+        /// True for either analytics denial. Crash admission distinguishes
+        /// ordinary denial from the forced-minor restriction.
         /// </summary>
         public static bool IsDeniedState(ShardPilotConsentState state)
         {

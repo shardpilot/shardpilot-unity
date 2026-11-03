@@ -393,10 +393,12 @@ namespace ShardPilot
         /// client. While disabled, <paramref name="disabledReason"/> carries
         /// <c>"not_configured"</c> when the client was initialized without a
         /// <see cref="ShardPilotConfig.CrashKey"/> (crash reporting is off
-        /// by configuration), <c>"consent_denied"</c> while analytics
-        /// consent is explicitly denied (a denial suppresses crash capture
-        /// too), <c>"opt_out"</c>, <c>"settings_read_failed"</c> (fail
-        /// closed), or <c>"not_initialized"</c> when no client exists.
+        /// by configuration), <c>"consent_denied"</c> while forced-minor
+        /// denial is active, <c>"opt_out"</c>, <c>"settings_read_failed"</c>
+        /// (fail closed), or <c>"not_initialized"</c> when no client exists.
+        /// Ordinary analytics denial still allows crash reporting without
+        /// analytics identifiers or breadcrumbs. Forced-minor denial also
+        /// purges pending crash state.
         /// </summary>
         public static bool IsCrashReportingEnabled(out string? disabledReason)
         {

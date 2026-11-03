@@ -56,6 +56,22 @@ namespace ShardPilot
             return value != null;
         }
 
+        internal static bool CrashPayloadNeedsGrant(string payload)
+        {
+            Dictionary<string, object> fields;
+            Dictionary<string, string> raw;
+            object crashId;
+            if (!TryParseUniqueObject(payload, out fields, out raw) ||
+                !fields.TryGetValue("crash_id", out crashId) || !(crashId is string id) || id.Length == 0) return true;
+            foreach (var key in fields.Keys)
+            {
+                if (string.Equals(key, "anonymous_id", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(key, "session_id", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(key, "breadcrumbs", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
         // Opt-in strict reader for signed objects. The ordinary reader retains
         // its compatibility behavior; this path rejects ambiguous decoded keys
         // at every depth and exposes exact root value tokens for forwarding.

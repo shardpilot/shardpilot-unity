@@ -119,11 +119,13 @@ namespace ShardPilot
                         eraStore = ShardPilotAnrEraStore.TryCreate(config, store, log);
                         if (eraStore != null)
                         {
+                            ShardPilotConsentState eraConsent;
+                            var eraActor = client.SnapshotCrashEraActor(out eraConsent);
                             eraStore.PersistEra(new ShardPilotAnrEraRecord
                             {
                                 EraId = eraId,
                                 StartedAtMs = nowUnixMs,
-                                AnonymousId = client.AnonymousId,
+                                AnonymousId = eraActor,
                                 // THIS launch's build, frozen into the era
                                 // snapshot: a next-launch AEI report for an
                                 // exit in this era must carry the build
@@ -132,7 +134,7 @@ namespace ShardPilot
                                 // the ANR to the wrong version.
                                 AppVersion = config.AppVersion,
                                 BuildId = config.AppBuild,
-                                ConsentState = ConsentStateName(client.ConsentState),
+                                ConsentState = ConsentStateName(eraConsent),
                                 CrashEnabled = true
                             });
                         }
@@ -195,6 +197,8 @@ namespace ShardPilot
                     return "granted";
                 case ShardPilotConsentState.Denied:
                     return "denied";
+                case ShardPilotConsentState.DeniedForcedMinor:
+                    return "forced_minor";
                 default:
                     return "unknown";
             }

@@ -24,8 +24,8 @@ public sealed class ShardPilotQuickstart : MonoBehaviour
         // SetConsent(true) from your consent dialog's accept handler (the
         // decision persists, so ask once); SetConsent(false) records a
         // denial. A configured crash key enables crash reporting; opt out
-        // via ShardPilotSdk.SetCrashReportingEnabled(false). Denied and
-        // DeniedForcedMinor also suppress crash capture.
+        // via ShardPilotSdk.SetCrashReportingEnabled(false). Forced-minor
+        // denial suppresses capture; ordinary denial omits analytics context.
         // Every overload reports whether the decision applied. A refusal
         // leaves analytics gated; durability warnings keep retrying but must
         // be surfaced when losing the receipt on exit is unacceptable.
