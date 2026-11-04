@@ -1,0 +1,11 @@
+{
+  "workspace_key": "ws_1",
+  "app_key": "app_1",
+  "environment_key": "env_1",
+  "app_version": "1.2.3",
+  "store": "steam",
+  "store_region": null,
+  "locale": "en-GB",
+  "platform": "windows",
+  "advisory": true
+}

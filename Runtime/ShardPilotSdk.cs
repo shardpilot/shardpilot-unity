@@ -6,6 +6,7 @@ using EventProperties = System.Collections.Generic.IDictionary<string, object>;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -141,6 +142,74 @@ namespace ShardPilot
             }
         }
 
+        private static int _startupInProgress;
+
+        /// <summary>
+        /// Reconciles the host's saved choices before starting SDK dispatch. Call from the Unity
+        /// main thread without an active client. Success confirms local reconciliation only.
+        /// </summary>
+        public static ShardPilotResult InitializeWithConsent(ShardPilotConfig config,
+            ShardPilotConsentDecision decision, bool crashReportingEnabled, ShardPilotConsentNotice? notice = null)
+            => InitializeWithConsentCore(config, decision, crashReportingEnabled, notice, c => ShardPilotClient.CreateForStartup(c));
+
+        internal static ShardPilotResult InitializeWithConsentCore(ShardPilotConfig config,
+            ShardPilotConsentDecision decision, bool crashEnabled, ShardPilotConsentNotice? notice,
+            Func<ShardPilotConfig, ShardPilotClient> create)
+        {
+            if (!ShardPilotHostLifecycle.IsMainThread) return ShardPilotClient.StartupFailure("startup_main_thread_required");
+            if (Interlocked.CompareExchange(ref _startupInProgress, 1, 0) != 0)
+                return ShardPilotClient.StartupFailure("startup_in_progress");
+            try
+            {
+                lock (Gate)
+                {
+                    if (_client != null) return ShardPilotClient.StartupFailure("startup_active_client");
+                    if (decision != ShardPilotConsentDecision.Granted && decision != ShardPilotConsentDecision.Denied &&
+                        decision != ShardPilotConsentDecision.DeniedForcedMinor)
+                        return ShardPilotClient.StartupFailure("invalid_consent");
+                    if (config == null) return ShardPilotClient.StartupFailure("startup_invalid_config");
+                    try { config = config.CloneWithDefaults(); }
+                    catch (ShardPilotConfigException) { return ShardPilotClient.StartupFailure("startup_invalid_config"); }
+                    if (decision == ShardPilotConsentDecision.DeniedForcedMinor &&
+                        (crashEnabled || !string.IsNullOrEmpty(config.CrashKey) || config.CrashHooksEnabled ||
+                         config.NativeCrashExitInfoEnabled || config.AnrExitInfoEnabled || config.HangWatchdogEnabled))
+                        return ShardPilotClient.StartupFailure("startup_minor_crash_config");
+                    if (crashEnabled && string.IsNullOrEmpty(config.CrashKey))
+                        return ShardPilotClient.StartupFailure("startup_crash_not_configured");
+                    var granted = decision == ShardPilotConsentDecision.Granted;
+                    if (!ShardPilotConsentNoticeValidator.TrySnapshot(notice, granted, out _, out var noticeError, out var noticeWarning))
+                        return ShardPilotClient.StartupFailure(noticeError);
+                    if (noticeWarning != null) notice = null;
+
+                    ShardPilotClient client = null;
+                    bool succeeded = false;
+                    try
+                    {
+                        client = create(config);
+                        if (client == null) return ShardPilotClient.StartupFailure("startup_conflicting_owner");
+                        var result = client.ReconcileStartup(decision, crashEnabled, notice, () =>
+                        {
+                            _remoteConfig = client.CreateRemoteConfig(RemoteConfigCachePath(), null);
+                            if (config.CrashHooksEnabled) _crashHooks = ShardPilotCrashHooks.Install(client);
+                        });
+                        if (!result.Success) return result;
+                        _closeCompletion = null;
+                        _client = client;
+                        succeeded = true;
+                        return noticeWarning == null ? result :
+                            new ShardPilotResult(true, null, false, TimeSpan.Zero, false, new[] { noticeWarning });
+                    }
+                    catch (InvalidOperationException) { return ShardPilotClient.StartupFailure("startup_unavailable"); }
+                    finally
+                    {
+                        if (!succeeded) { _crashHooks?.Dispose(); _crashHooks = null; _remoteConfig = null; }
+                        client?.EndStartup(succeeded);
+                    }
+                }
+            }
+            finally { Volatile.Write(ref _startupInProgress, 0); }
+        }
+
         /// <summary>
         /// Initializes the SDK. Must be called on the Unity main thread: it
         /// resolves the persisted anonymous id and consent state through
@@ -194,6 +263,8 @@ namespace ShardPilot
             using (ShardPilotHandoffNotices.Hold())
             lock (Gate)
             {
+                if (Volatile.Read(ref _startupInProgress) != 0)
+                    throw new InvalidOperationException("SDK startup reconciliation is in progress");
                 previous = _client;
                 if (previous != null)
                 {

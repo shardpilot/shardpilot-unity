@@ -1322,6 +1322,7 @@ namespace ShardPilot
             IShardPilotTransport transport, bool startWorker, IShardPilotKeyValueStore settingsStore,
             IShardPilotHttpRequestSender httpSender, bool deferDispatchForRegistration)
         {
+            using var reservation = construction;
             _hostConstruction = construction;
             if (config == null)
             {
@@ -2805,6 +2806,7 @@ namespace ShardPilot
             }
 #endif
             if (!deferDispatchForRegistration) CompleteHostConstruction(false);
+            construction.Initialized = true;
         }
 
         /// <summary>
@@ -7395,6 +7397,7 @@ namespace ShardPilot
         /// </summary>
         private void MaybeStartCrashResendPass()
         {
+            if (StartupDispatchHeld) return;
             if (_crashSpool == null || _httpSender == null)
             {
                 return;
@@ -11124,6 +11127,7 @@ namespace ShardPilot
         /// </param>
         private void MaybeKickConsentOutbox(bool workerCadence)
         {
+            if (StartupDispatchHeld) return;
             Volatile.Read(ref _nonObjectionPulse)?.Invoke();
             if (_httpSender == null)
             {

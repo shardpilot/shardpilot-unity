@@ -1,0 +1,1 @@
+{"error":{"code":"forbidden","message":"advisory non-objection is not available for this device request","details":[{"field":"admission_basis","code":"consent_grant_requires_verified_credential","message":"a qualifying server-resolved region is required for a publishable key"}]}}

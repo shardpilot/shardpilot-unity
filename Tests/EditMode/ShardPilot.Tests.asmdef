@@ -1,0 +1,22 @@
+{
+  "name": "ShardPilot.Tests",
+  "rootNamespace": "ShardPilot.Tests",
+  "references": [
+    "ShardPilot.Runtime",
+    "ShardPilot.Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -1,0 +1,59 @@
+{
+  "corpus": "sdk-wire-conformance", "version": "1.0.0", "schema_version": 1, "byte_exact": true,
+  "sdks": ["go", "defold", "godot", "unreal", "unity"],
+  "approved_headers": ["Content-Type", "Cache-Control", "ETag", "If-None-Match", "Retry-After", "Vary", "X-ShardPilot-Anonymous-Id"],
+  "credential_kinds": {"none": "none", "service": "service_token", "client_key": "publishable_key", "client": "client_jwt", "publishable bearer key, not recorded": "publishable_key", "api_key": "api_key"},
+  "operations": {
+    "batchIngestEvents": {"source": "events", "named_by": "openapi", "method": "POST", "path": "/v1/events:batch"},
+    "recordConsent": {"source": "events", "named_by": "corpus", "method": "POST", "path": "/v1/consent"},
+    "resolveConsentPolicy": {"source": "config", "named_by": "openapi", "method": "POST", "path": "/api/cp/v1/consent/policy"},
+    "fetchRemoteConfigSDKConfigByKeys": {"source": "config", "named_by": "openapi", "method": "GET", "path": "/config/v1/{workspace_key}/{environment_key}"},
+    "ingestCrash": {"source": "crash", "named_by": "openapi", "method": "POST", "path": "/api/v1/crashes/ingest", "credential": "api_key"}
+  },
+  "applicability": {
+    "batch": {"go": {"value": "required", "reason": "sends this request and must handle every captured response"}, "defold": {"value": "required", "reason": "sends this request and must handle every captured response"}, "godot": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unreal": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unity": {"value": "required", "reason": "sends this request and must handle every captured response"}},
+    "consent": {"go": {"value": "required", "reason": "sends this request and must handle every captured response"}, "defold": {"value": "required", "reason": "sends this request and must handle every captured response"}, "godot": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unreal": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unity": {"value": "required", "reason": "sends this request and must handle every captured response"}},
+    "consent_policy": {"go": {"value": "parse_only", "reason": "does not send this request; must parse every captured resolver response"}, "defold": {"value": "required", "reason": "requests the consent-policy plan and must handle every captured response"}, "godot": {"value": "unsupported", "reason": "no consent-policy resolver API; these cases do not apply"}, "unreal": {"value": "unsupported", "reason": "no consent-policy resolver API; these cases do not apply"}, "unity": {"value": "required", "reason": "requests the consent-policy plan and must handle every captured response"}},
+    "non_objection": {"go": {"value": "unsupported", "reason": "no non-objection recording API; these cases do not apply"}, "defold": {"value": "required", "reason": "records non-objection and must handle every captured response"}, "godot": {"value": "unsupported", "reason": "no non-objection recording API; these cases do not apply"}, "unreal": {"value": "unsupported", "reason": "no non-objection recording API; these cases do not apply"}, "unity": {"value": "required", "reason": "records non-objection and must handle every captured response"}},
+    "remote_config": {"go": {"value": "required", "reason": "sends this request and must handle every captured response"}, "defold": {"value": "required", "reason": "sends this request and must handle every captured response"}, "godot": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unreal": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unity": {"value": "required", "reason": "sends this request and must handle every captured response"}},
+    "crash": {"go": {"value": "required", "reason": "sends this request and must handle every captured response"}, "defold": {"value": "required", "reason": "sends this request and must handle every captured response"}, "godot": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unreal": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unity": {"value": "required", "reason": "sends this request and must handle every captured response"}},
+    "identity": {"go": {"value": "required", "reason": "sends this request and must handle every captured response"}, "defold": {"value": "required", "reason": "sends this request and must handle every captured response"}, "godot": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unreal": {"value": "required", "reason": "sends this request and must handle every captured response"}, "unity": {"value": "required", "reason": "sends this request and must handle every captured response"}}
+  },
+  "gaps": [
+    {"id": "consent-minor-age-constraint", "surface": "consent", "status": "not_captured", "note": "No captured case records or refuses consent under a minor or age constraint."},
+    {"id": "rc-unsafe-identity-header-withheld", "surface": "remote_config", "status": "not_captured", "note": "No captured case shows an unsafe X-ShardPilot-Anonymous-Id value being withheld."},
+    {"id": "rc-retry-after-missing-or-invalid", "surface": "remote_config", "status": "not_captured", "note": "Every captured 429 and 503 carries a valid Retry-After; a missing or invalid value is not captured."},
+    {"id": "rc-legacy-three-segment-route", "surface": "remote_config", "status": "not_captured", "note": "The legacy three-segment remote config route, which adds a client ID, is not captured."},
+    {"id": "rc-kill-state-503", "surface": "remote_config", "status": "not_captured", "note": "No captured 503 for a remote config kill state."},
+    {"id": "crash-verified-user-identity", "surface": "identity", "status": "unsupported", "note": "The crash receiver has no verified-user mode, so a claimed user_id is never the actor. Unsupported, not skipped."}
+  ],
+  "cases": [
+    ["batch", "batchIngestEvents", "receiver_admitted", ["batch-accepted", "batch-size-rejected-mixed", "batch-duplicate", "batch-suppressed-no-consent"]],
+    ["batch", "batchIngestEvents", "receiver_refused", ["batch-retired-scope-member", "batch-malformed-json"]],
+    ["consent", "recordConsent", "receiver_admitted", ["consent-grant-notice", "consent-denial-publishable", "consent-replayed"]],
+    ["consent", "recordConsent", "receiver_refused", ["consent-grant-publishable-refused", "consent-retired-scope-member"]],
+    ["non_objection", "recordConsent", "receiver_admitted", ["nonobjection-recorded", "nonobjection-flag-off"]],
+    ["non_objection", "recordConsent", "receiver_refused", ["nonobjection-service-refused", "nonobjection-publishable-no-region", "nonobjection-mixed-categories", "nonobjection-retired-scope-member"]],
+    ["identity", "batchIngestEvents", "receiver_admitted", ["identity-batch-anonymous", "identity-batch-user-and-anonymous"]],
+    ["identity", "recordConsent", "receiver_admitted", ["identity-consent-subject-match"]],
+    ["identity", "recordConsent", "receiver_refused", ["identity-consent-subject-mismatch", "identity-consent-kind-forgery"]],
+    ["consent_policy", "resolveConsentPolicy", "receiver_admitted", ["resolver.resolved-strict-200", "resolver.advisory-admitted-200", "resolver.locale-mixed-case-200"]],
+    ["consent_policy", "resolveConsentPolicy", "receiver_refused", ["resolver.refusal-invalid-scope-400", "resolver.refusal-retired-key-400", "resolver.refusal-unknown-scope-400"]],
+    ["remote_config", "fetchRemoteConfigSDKConfigByKeys", "receiver_admitted", ["rc.two-key-200", "rc.identity-header-200", "rc.etag-304-match", "rc.etag-304-identity-header", "rc.etag-200-stale"]],
+    ["remote_config", "fetchRemoteConfigSDKConfigByKeys", "receiver_refused", ["rc.unauthorized-401", "rc.unknown-workspace-key-400", "rc.unknown-environment-key-400", "rc.not-published-404", "rc.rate-limited-429-positive-retry", "rc.rate-limited-429-default-retry", "rc.scope-unavailable-503"]],
+    ["crash", "ingestCrash", "receiver_admitted", ["json_ingest", "json_key_id_shaped"]],
+    ["crash", "ingestCrash", "receiver_refused", ["json_retired"]],
+    ["identity", "ingestCrash", "receiver_admitted", ["json_identity_claimed_user", "json_identity_user_only"]]
+  ],
+  "see_also": {
+    "identity-batch-anonymous": ["batch-accepted", "identity-batch-user-and-anonymous"],
+    "identity-batch-user-and-anonymous": ["identity-batch-anonymous", "json_identity_claimed_user"],
+    "identity-consent-subject-match": ["identity-consent-subject-mismatch", "consent-grant-notice"],
+    "identity-consent-subject-mismatch": ["identity-consent-subject-match"],
+    "identity-consent-kind-forgery": ["consent-grant-publishable-refused"],
+    "rc.identity-header-200": ["rc.two-key-200", "rc.etag-304-identity-header"],
+    "rc.etag-304-identity-header": ["rc.etag-304-match", "rc.identity-header-200"],
+    "json_identity_claimed_user": ["json_ingest", "json_identity_user_only", "identity-batch-user-and-anonymous"],
+    "json_identity_user_only": ["json_ingest", "json_identity_claimed_user"]
+  }
+}

@@ -1,0 +1,1 @@
+{"error":{"code":"forbidden","message":"publishable client keys may record consent for their own anon actor only","details":[{"field":"kind","code":"consent_kind_requires_verified_credential","message":"a publishable client key's consent receipt is bound to its own \"anon\" actor: kind must be omitted or \"anon\" — other kinds require a verified credential"}]}}

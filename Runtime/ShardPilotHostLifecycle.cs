@@ -10,9 +10,12 @@ namespace ShardPilot
     internal static class ShardPilotHostLifecycle
     {
         private static bool _exited;
+        private static int _mainThreadId;
+        internal static bool IsMainThread => Volatile.Read(ref _mainThreadId) == Thread.CurrentThread.ManagedThreadId;
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         internal static void Enter()
         {
+            Volatile.Write(ref _mainThreadId, Thread.CurrentThread.ManagedThreadId);
             if (!_exited) return;
             ShardPilotDispatcher.RetireHost(); // A fenced late constructor may have allocated another host.
             ShardPilotSdk.ClearHostRoots(true);

@@ -1,0 +1,1 @@
+{"error":{"code":"forbidden","message":"advisory non-objection requires a verified credential","details":[{"field":"admission_basis","code":"consent_grant_requires_verified_credential","message":"a bound Mode-B client credential is required at this endpoint"}]}}

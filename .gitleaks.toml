@@ -1,0 +1,12 @@
+title = "SDK gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic workspace member in published conformance request captures."
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['(^|/)Tests~/Conformance/v1/bodies/[^/]+\.request$']
+regexTarget = "match"
+regexes = ['^workspace_key"\s*:\s*"synthetic-ws-01"$']

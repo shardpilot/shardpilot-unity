@@ -1,0 +1,1 @@
+{"error":{"code":"validation_error","message":"request validation failed","details":[{"field":"admission_basis","code":"invalid","message":"request must satisfy the advisory_non_objection v1 recording contract"}]}}

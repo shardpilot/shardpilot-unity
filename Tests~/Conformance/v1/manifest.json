@@ -1,0 +1,1528 @@
+{
+  "corpus": "sdk-wire-conformance",
+  "version": "1.0.0",
+  "schema_version": 1,
+  "byte_exact": true,
+  "sdks": [
+    "go",
+    "defold",
+    "godot",
+    "unreal",
+    "unity"
+  ],
+  "applicability": {
+    "batch": {
+      "go": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "defold": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "godot": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unreal": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unity": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      }
+    },
+    "consent": {
+      "go": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "defold": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "godot": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unreal": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unity": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      }
+    },
+    "consent_policy": {
+      "go": {
+        "value": "parse_only",
+        "reason": "does not send this request; must parse every captured resolver response"
+      },
+      "defold": {
+        "value": "required",
+        "reason": "requests the consent-policy plan and must handle every captured response"
+      },
+      "godot": {
+        "value": "unsupported",
+        "reason": "no consent-policy resolver API; these cases do not apply"
+      },
+      "unreal": {
+        "value": "unsupported",
+        "reason": "no consent-policy resolver API; these cases do not apply"
+      },
+      "unity": {
+        "value": "required",
+        "reason": "requests the consent-policy plan and must handle every captured response"
+      }
+    },
+    "non_objection": {
+      "go": {
+        "value": "unsupported",
+        "reason": "no non-objection recording API; these cases do not apply"
+      },
+      "defold": {
+        "value": "required",
+        "reason": "records non-objection and must handle every captured response"
+      },
+      "godot": {
+        "value": "unsupported",
+        "reason": "no non-objection recording API; these cases do not apply"
+      },
+      "unreal": {
+        "value": "unsupported",
+        "reason": "no non-objection recording API; these cases do not apply"
+      },
+      "unity": {
+        "value": "required",
+        "reason": "records non-objection and must handle every captured response"
+      }
+    },
+    "remote_config": {
+      "go": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "defold": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "godot": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unreal": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unity": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      }
+    },
+    "crash": {
+      "go": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "defold": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "godot": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unreal": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unity": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      }
+    },
+    "identity": {
+      "go": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "defold": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "godot": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unreal": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      },
+      "unity": {
+        "value": "required",
+        "reason": "sends this request and must handle every captured response"
+      }
+    }
+  },
+  "gaps": [
+    {
+      "id": "consent-minor-age-constraint",
+      "surface": "consent",
+      "status": "not_captured",
+      "note": "No captured case records or refuses consent under a minor or age constraint."
+    },
+    {
+      "id": "rc-unsafe-identity-header-withheld",
+      "surface": "remote_config",
+      "status": "not_captured",
+      "note": "No captured case shows an unsafe X-ShardPilot-Anonymous-Id value being withheld."
+    },
+    {
+      "id": "rc-retry-after-missing-or-invalid",
+      "surface": "remote_config",
+      "status": "not_captured",
+      "note": "Every captured 429 and 503 carries a valid Retry-After; a missing or invalid value is not captured."
+    },
+    {
+      "id": "rc-legacy-three-segment-route",
+      "surface": "remote_config",
+      "status": "not_captured",
+      "note": "The legacy three-segment remote config route, which adds a client ID, is not captured."
+    },
+    {
+      "id": "rc-kill-state-503",
+      "surface": "remote_config",
+      "status": "not_captured",
+      "note": "No captured 503 for a remote config kill state."
+    },
+    {
+      "id": "crash-verified-user-identity",
+      "surface": "identity",
+      "status": "unsupported",
+      "note": "The crash receiver has no verified-user mode, so a claimed user_id is never the actor. Unsupported, not skipped."
+    }
+  ],
+  "cases": [
+    {
+      "id": "batch-accepted",
+      "surface": "batch",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/batch-accepted.request",
+        "bytes": 393,
+        "sha256": "8e59c5f061db93e0f3e9607550e215e167ffbbe2734b2d2cf3abfeb8143945c3"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/batch-accepted.response",
+        "bytes": 141,
+        "sha256": "d2b48b8f856319ede69953007a0ad83e06e1ce01c523cd355845a9822fdfcbb4"
+      }
+    },
+    {
+      "id": "batch-size-rejected-mixed",
+      "surface": "batch",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/batch-size-rejected-mixed.request",
+        "bytes": 2824,
+        "sha256": "4ba6a7c3a691ea704cf4291221ac77d3b936c327c2ef73f13198845296475ad3"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/batch-size-rejected-mixed.response",
+        "bytes": 393,
+        "sha256": "b66959dd4cbf4277afb682c3a0919225b25d6074e79f05c0d1d879b28f016dbd"
+      }
+    },
+    {
+      "id": "batch-duplicate",
+      "surface": "batch",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/batch-duplicate.request",
+        "bytes": 393,
+        "sha256": "8e59c5f061db93e0f3e9607550e215e167ffbbe2734b2d2cf3abfeb8143945c3"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/batch-duplicate.response",
+        "bytes": 212,
+        "sha256": "181e493ac052c93b048bb2287155cbf2d473df7c9c496f50eba4fb9732047eb0"
+      }
+    },
+    {
+      "id": "batch-suppressed-no-consent",
+      "surface": "batch",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/batch-suppressed-no-consent.request",
+        "bytes": 404,
+        "sha256": "f100902032cae23c9fccdde09dc88304b2ac7fcbbee84975d1642790905998a6"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/batch-suppressed-no-consent.response",
+        "bytes": 259,
+        "sha256": "9eb8ea79d469ce550435bb36feff1cb72fbb495454730e2fed5019f2d76ed7dd"
+      }
+    },
+    {
+      "id": "batch-retired-scope-member",
+      "surface": "batch",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/batch-retired-scope-member.request",
+        "bytes": 424,
+        "sha256": "fb2ccc4109578f2e72b7e5cc02976cff4ce5b58fa95f40ff5014bdd40da2dac3"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/batch-retired-scope-member.response",
+        "bytes": 183,
+        "sha256": "e83a6a8b7e80b0962414ad698ec44e96396371eb8257d365ff391d8f11808b9c"
+      }
+    },
+    {
+      "id": "batch-malformed-json",
+      "surface": "batch",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/batch-malformed-json.request",
+        "bytes": 11,
+        "sha256": "27d374b1faa3fcfacffeff8592cb63c37e3fca2ef69bed530491a16d64f32e63"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/batch-malformed-json.response",
+        "bytes": 171,
+        "sha256": "1fcf02bd2de7fc629470bf553a0e2be9d559fa12210887475c9ccf0ee35607ba"
+      }
+    },
+    {
+      "id": "consent-grant-notice",
+      "surface": "consent",
+      "operation": "recordConsent",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/consent-grant-notice.request",
+        "bytes": 343,
+        "sha256": "82e44f90433464d535e4551acd210094d88e947632cbd09b6ff6c58cedc0ccb4"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/consent-grant-notice.response",
+        "bytes": 35,
+        "sha256": "8add729673ccd76ee0baee7352dccff01efebc6387439a56c03c523ed34f2e0b"
+      }
+    },
+    {
+      "id": "consent-denial-publishable",
+      "surface": "consent",
+      "operation": "recordConsent",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "publishable_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/consent-denial-publishable.request",
+        "bytes": 257,
+        "sha256": "d79371a23712573d10ada119b6319cfc321148455017e0900d98f50d8870d635"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/consent-denial-publishable.response",
+        "bytes": 35,
+        "sha256": "8add729673ccd76ee0baee7352dccff01efebc6387439a56c03c523ed34f2e0b"
+      }
+    },
+    {
+      "id": "consent-replayed",
+      "surface": "consent",
+      "operation": "recordConsent",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/consent-replayed.request",
+        "bytes": 257,
+        "sha256": "d79371a23712573d10ada119b6319cfc321148455017e0900d98f50d8870d635"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/consent-replayed.response",
+        "bytes": 34,
+        "sha256": "2932bd95155ec874bf4d65ed649e4423493041ec28f2307e1f9d4c5c9e70c874"
+      }
+    },
+    {
+      "id": "consent-grant-publishable-refused",
+      "surface": "consent",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "publishable_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/consent-grant-publishable-refused.request",
+        "bytes": 343,
+        "sha256": "82e44f90433464d535e4551acd210094d88e947632cbd09b6ff6c58cedc0ccb4"
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/consent-grant-publishable-refused.response",
+        "bytes": 338,
+        "sha256": "c3de7632d6dce1f44d097321fa6d1f35e457d0624660d1c5fe131b3e1ed55ed0"
+      }
+    },
+    {
+      "id": "consent-retired-scope-member",
+      "surface": "consent",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/consent-retired-scope-member.request",
+        "bytes": 288,
+        "sha256": "4ffc1261fdd387ffbaf2a0220549ac106d53122d12ebedbaa60baaae1e93a860"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/consent-retired-scope-member.response",
+        "bytes": 183,
+        "sha256": "e83a6a8b7e80b0962414ad698ec44e96396371eb8257d365ff391d8f11808b9c"
+      }
+    },
+    {
+      "id": "nonobjection-recorded",
+      "surface": "non_objection",
+      "operation": "recordConsent",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "client_jwt",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/nonobjection-recorded.request",
+        "bytes": 752,
+        "sha256": "ee047aa4d8a02949c55de1aa1c7ab16e49d446cd45039892e1c0d5a142e3e6d2"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/nonobjection-recorded.response",
+        "bytes": 78,
+        "sha256": "fa242aa0359c0bbb56fa759db110db9429e5b0d95211896b4733160bad2f176b"
+      }
+    },
+    {
+      "id": "nonobjection-flag-off",
+      "surface": "non_objection",
+      "operation": "recordConsent",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "client_jwt",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/nonobjection-flag-off.request",
+        "bytes": 752,
+        "sha256": "ee047aa4d8a02949c55de1aa1c7ab16e49d446cd45039892e1c0d5a142e3e6d2"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/nonobjection-flag-off.response",
+        "bytes": 35,
+        "sha256": "8add729673ccd76ee0baee7352dccff01efebc6387439a56c03c523ed34f2e0b"
+      }
+    },
+    {
+      "id": "nonobjection-service-refused",
+      "surface": "non_objection",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/nonobjection-service-refused.request",
+        "bytes": 752,
+        "sha256": "ee047aa4d8a02949c55de1aa1c7ab16e49d446cd45039892e1c0d5a142e3e6d2"
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/nonobjection-service-refused.response",
+        "bytes": 263,
+        "sha256": "95e883b4f1e9aaf5ecb2f9ba061fce41deafe09d3437cfa845e38c1e0bb35ec6"
+      }
+    },
+    {
+      "id": "nonobjection-publishable-no-region",
+      "surface": "non_objection",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "publishable_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/nonobjection-publishable-no-region.request",
+        "bytes": 752,
+        "sha256": "ee047aa4d8a02949c55de1aa1c7ab16e49d446cd45039892e1c0d5a142e3e6d2"
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/nonobjection-publishable-no-region.response",
+        "bytes": 281,
+        "sha256": "fa70c0e01dd5fca454b6f0423e87c000d10dfbd09dfc55a78b623be75505d49e"
+      }
+    },
+    {
+      "id": "nonobjection-mixed-categories",
+      "surface": "non_objection",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "client_jwt",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/nonobjection-mixed-categories.request",
+        "bytes": 784,
+        "sha256": "c59eb7bc56b5cdef7d5461c8aad2e4e93fa5b3e50fded73f9918ef5ad85dccaa"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/nonobjection-mixed-categories.response",
+        "bytes": 215,
+        "sha256": "5fdf7673861aace72b5b4e33ff11f76a0d985de252e5bab598e963a48bbecb23"
+      }
+    },
+    {
+      "id": "nonobjection-retired-scope-member",
+      "surface": "non_objection",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "client_jwt",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/nonobjection-retired-scope-member.request",
+        "bytes": 783,
+        "sha256": "bbc9b139c7dc3efa078f69c032f15d831742f7a97c089ae9bda11ad4d79211ef"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/nonobjection-retired-scope-member.response",
+        "bytes": 183,
+        "sha256": "e83a6a8b7e80b0962414ad698ec44e96396371eb8257d365ff391d8f11808b9c"
+      }
+    },
+    {
+      "id": "identity-batch-anonymous",
+      "surface": "identity",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_admitted",
+      "see_also": [
+        "batch-accepted",
+        "identity-batch-user-and-anonymous"
+      ],
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/identity-batch-anonymous.request",
+        "bytes": 411,
+        "sha256": "de9bb4f7deed2b0fa9bc90ab1928f8624a9c00bc9a18902eba26475c3dba7b62"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/identity-batch-anonymous.response",
+        "bytes": 141,
+        "sha256": "679ef36ccf7148c0872c6f7d69f1a2099e09248c955f393edbd75ff59c71471e"
+      }
+    },
+    {
+      "id": "identity-batch-user-and-anonymous",
+      "surface": "identity",
+      "operation": "batchIngestEvents",
+      "evidence": "receiver_admitted",
+      "see_also": [
+        "identity-batch-anonymous",
+        "json_identity_claimed_user"
+      ],
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/events:batch",
+        "path_template": "/v1/events:batch",
+        "credential": "service_token",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/identity-batch-user-and-anonymous.request",
+        "bytes": 430,
+        "sha256": "7f4fe5b1d2910289bb1a443bc730bd8d6961f7ec32fa95555e2cd4ea54350680"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/identity-batch-user-and-anonymous.response",
+        "bytes": 141,
+        "sha256": "333055f09ce126cd11bd4a1fce4145918a79ebd13f23f71fc32dc9a723a6b6ab"
+      }
+    },
+    {
+      "id": "identity-consent-subject-match",
+      "surface": "identity",
+      "operation": "recordConsent",
+      "evidence": "receiver_admitted",
+      "see_also": [
+        "identity-consent-subject-mismatch",
+        "consent-grant-notice"
+      ],
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "client_jwt",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/identity-consent-subject-match.request",
+        "bytes": 257,
+        "sha256": "d79371a23712573d10ada119b6319cfc321148455017e0900d98f50d8870d635"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/identity-consent-subject-match.response",
+        "bytes": 35,
+        "sha256": "8add729673ccd76ee0baee7352dccff01efebc6387439a56c03c523ed34f2e0b"
+      }
+    },
+    {
+      "id": "identity-consent-subject-mismatch",
+      "surface": "identity",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "see_also": [
+        "identity-consent-subject-match"
+      ],
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "client_jwt",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/identity-consent-subject-mismatch.request",
+        "bytes": 257,
+        "sha256": "d79371a23712573d10ada119b6319cfc321148455017e0900d98f50d8870d635"
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/identity-consent-subject-mismatch.response",
+        "bytes": 240,
+        "sha256": "8ebc96c5e32b7f08b58c4b1044cd45714adc3ab8374063c3b042595e60dc8d0c"
+      }
+    },
+    {
+      "id": "identity-consent-kind-forgery",
+      "surface": "identity",
+      "operation": "recordConsent",
+      "evidence": "receiver_refused",
+      "see_also": [
+        "consent-grant-publishable-refused"
+      ],
+      "operation_named_by": "corpus",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/v1/consent",
+        "path_template": "/v1/consent",
+        "credential": "publishable_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/identity-consent-kind-forgery.request",
+        "bytes": 266,
+        "sha256": "a6be8deaa1072b30b58a34a84b8dbc19eebe3155f6da1ce4295daa0138bb7362"
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/identity-consent-kind-forgery.response",
+        "bytes": 366,
+        "sha256": "34abb370bc5f35feec43abac155c0c90098047b7e40fa73c88050c731949b1ea"
+      }
+    },
+    {
+      "id": "resolver.resolved-strict-200",
+      "surface": "consent_policy",
+      "operation": "resolveConsentPolicy",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/cp/v1/consent/policy",
+        "path_template": "/api/cp/v1/consent/policy",
+        "credential": "none",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/resolver.resolved-strict-200.request",
+        "bytes": 164,
+        "sha256": "06408c19b65189145f4bd57097740760e2ebb891234cf620ab4e6e2255afdbc2"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/resolver.resolved-strict-200.response",
+        "bytes": 1325,
+        "sha256": "96a0b57b1abe7ad98fbf0884e873ab1c6a19a51caba84908ddd98f8620905405"
+      }
+    },
+    {
+      "id": "resolver.advisory-admitted-200",
+      "surface": "consent_policy",
+      "operation": "resolveConsentPolicy",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/cp/v1/consent/policy",
+        "path_template": "/api/cp/v1/consent/policy",
+        "credential": "none",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/resolver.advisory-admitted-200.request",
+        "bytes": 218,
+        "sha256": "13c546105be8c973a6efb0bab8412cea089778546d78afe52ed170102a58b5e7"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/resolver.advisory-admitted-200.response",
+        "bytes": 2235,
+        "sha256": "78d260dc15bb00f482ddcc6f061b0a86b11c2bcb665e604f159f35e0410896e2"
+      }
+    },
+    {
+      "id": "resolver.locale-mixed-case-200",
+      "surface": "consent_policy",
+      "operation": "resolveConsentPolicy",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/cp/v1/consent/policy",
+        "path_template": "/api/cp/v1/consent/policy",
+        "credential": "none",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/resolver.locale-mixed-case-200.request",
+        "bytes": 164,
+        "sha256": "f8f6b14f57ed00f16d80e7bbe9872cb93c31c153c9d0ce891cbff18c58cef223"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/resolver.locale-mixed-case-200.response",
+        "bytes": 1325,
+        "sha256": "96a0b57b1abe7ad98fbf0884e873ab1c6a19a51caba84908ddd98f8620905405"
+      }
+    },
+    {
+      "id": "resolver.refusal-invalid-scope-400",
+      "surface": "consent_policy",
+      "operation": "resolveConsentPolicy",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/cp/v1/consent/policy",
+        "path_template": "/api/cp/v1/consent/policy",
+        "credential": "none",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/resolver.refusal-invalid-scope-400.request",
+        "bytes": 175,
+        "sha256": "54644143bee8e702f007e82d52c8dd6aeaa3ef771b41e7e154d2160b0e6688e0"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/resolver.refusal-invalid-scope-400.response",
+        "bytes": 1336,
+        "sha256": "fc9cab63180c7f2a57b8654202586ac7255b1a71b92dd2c64f0f573181424563"
+      }
+    },
+    {
+      "id": "resolver.refusal-retired-key-400",
+      "surface": "consent_policy",
+      "operation": "resolveConsentPolicy",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/cp/v1/consent/policy",
+        "path_template": "/api/cp/v1/consent/policy",
+        "credential": "none",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/resolver.refusal-retired-key-400.request",
+        "bytes": 163,
+        "sha256": "5917ac456ecf13903121fcf31ebea39a81fe309b699eb24f66e993230fbfe585"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/resolver.refusal-retired-key-400.response",
+        "bytes": 1338,
+        "sha256": "a43527878da4c7392d387533fa0957a35230865dbeb126815f9bf8c4e3631a18"
+      }
+    },
+    {
+      "id": "resolver.refusal-unknown-scope-400",
+      "surface": "consent_policy",
+      "operation": "resolveConsentPolicy",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/cp/v1/consent/policy",
+        "path_template": "/api/cp/v1/consent/policy",
+        "credential": "none",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/resolver.refusal-unknown-scope-400.request",
+        "bytes": 170,
+        "sha256": "46be40e58d1feebcc173395d3fb426c814c356f8f6ea1ed397d95e5d070f71e9"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        "file": "bodies/resolver.refusal-unknown-scope-400.response",
+        "bytes": 1336,
+        "sha256": "fc9cab63180c7f2a57b8654202586ac7255b1a71b92dd2c64f0f573181424563"
+      }
+    },
+    {
+      "id": "rc.two-key-200",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "private, max-age=300",
+          "Content-Type": "application/json; charset=utf-8",
+          "ETag": "\"rcfg-1-1ab39d548add4444\"",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.two-key-200.response",
+        "bytes": 59,
+        "sha256": "1ab39d548add444493f700fdfa4d5eb801b540765b50a78e40d56bd392af8bcf"
+      }
+    },
+    {
+      "id": "rc.identity-header-200",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_admitted",
+      "see_also": [
+        "rc.two-key-200",
+        "rc.etag-304-identity-header"
+      ],
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {
+          "X-ShardPilot-Anonymous-Id": "synthetic-anon-1"
+        },
+        "bytes": 0
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "private, max-age=300",
+          "Content-Type": "application/json; charset=utf-8",
+          "ETag": "\"rcfg-1-1ab39d548add4444\"",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.identity-header-200.response",
+        "bytes": 59,
+        "sha256": "1ab39d548add444493f700fdfa4d5eb801b540765b50a78e40d56bd392af8bcf"
+      }
+    },
+    {
+      "id": "rc.etag-304-match",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {
+          "If-None-Match": "\"rcfg-1-1ab39d548add4444\""
+        },
+        "bytes": 0
+      },
+      "response": {
+        "status": 304,
+        "headers": {
+          "Cache-Control": "private, max-age=300",
+          "ETag": "\"rcfg-1-1ab39d548add4444\"",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "bytes": 0
+      }
+    },
+    {
+      "id": "rc.etag-304-identity-header",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_admitted",
+      "see_also": [
+        "rc.etag-304-match",
+        "rc.identity-header-200"
+      ],
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {
+          "If-None-Match": "\"rcfg-1-1ab39d548add4444\"",
+          "X-ShardPilot-Anonymous-Id": "synthetic-anon-1"
+        },
+        "bytes": 0
+      },
+      "response": {
+        "status": 304,
+        "headers": {
+          "Cache-Control": "private, max-age=300",
+          "ETag": "\"rcfg-1-1ab39d548add4444\"",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "bytes": 0
+      }
+    },
+    {
+      "id": "rc.etag-200-stale",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {
+          "If-None-Match": "\"rcfg-0-0000000000000000\""
+        },
+        "bytes": 0
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "private, max-age=300",
+          "Content-Type": "application/json; charset=utf-8",
+          "ETag": "\"rcfg-1-1ab39d548add4444\"",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.etag-200-stale.response",
+        "bytes": 59,
+        "sha256": "1ab39d548add444493f700fdfa4d5eb801b540765b50a78e40d56bd392af8bcf"
+      }
+    },
+    {
+      "id": "rc.unauthorized-401",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "none",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.unauthorized-401.response",
+        "bytes": 67,
+        "sha256": "abf3e9a2ad166bb6f8cba05fb3fed4e666923b0ce32e1faec53fb7cdc09b674f"
+      }
+    },
+    {
+      "id": "rc.unknown-workspace-key-400",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/missing-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.unknown-workspace-key-400.response",
+        "bytes": 179,
+        "sha256": "8a38f5129ff87cb049ac4a5ec5b0f216e982fc99eb089b0fcf5a8c77c7167f3a"
+      }
+    },
+    {
+      "id": "rc.unknown-environment-key-400",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/missing-env",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.unknown-environment-key-400.response",
+        "bytes": 189,
+        "sha256": "1f9fc2bfeec8696834be55e6714cb898c834169bbf9349352f0f02f158566863"
+      }
+    },
+    {
+      "id": "rc.not-published-404",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.not-published-404.response",
+        "bytes": 94,
+        "sha256": "1ab69f913e7b431e87bab6c38db12595e2c0a98abbb1c57c68d58b1ba74fff07"
+      }
+    },
+    {
+      "id": "rc.rate-limited-429-positive-retry",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "Retry-After": "17",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.rate-limited-429-positive-retry.response",
+        "bytes": 78,
+        "sha256": "40086f0b82d816fdc6eb507c79221adc5c6ec9a477cb846a7f17f45210a9fd6c"
+      }
+    },
+    {
+      "id": "rc.rate-limited-429-default-retry",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "Retry-After": "60",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.rate-limited-429-default-retry.response",
+        "bytes": 78,
+        "sha256": "40086f0b82d816fdc6eb507c79221adc5c6ec9a477cb846a7f17f45210a9fd6c"
+      }
+    },
+    {
+      "id": "rc.scope-unavailable-503",
+      "surface": "remote_config",
+      "operation": "fetchRemoteConfigSDKConfigByKeys",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "GET",
+        "path": "/config/v1/exposure-ws/develop",
+        "path_template": "/config/v1/{workspace_key}/{environment_key}",
+        "credential": "publishable_key",
+        "headers": {},
+        "bytes": 0
+      },
+      "response": {
+        "status": 503,
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8",
+          "Retry-After": "5",
+          "Vary": "Authorization, X-ShardPilot-Anonymous-Id, Origin"
+        },
+        "file": "bodies/rc.scope-unavailable-503.response",
+        "bytes": 83,
+        "sha256": "d1f657a60fec255e10948f5a3c6bddfa671fe3f09332c88d7781d2326689ae98"
+      }
+    },
+    {
+      "id": "json_ingest",
+      "surface": "crash",
+      "operation": "ingestCrash",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/crashes/ingest",
+        "path_template": "/api/v1/crashes/ingest",
+        "credential": "api_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/json_ingest.request",
+        "bytes": 398,
+        "sha256": "262c9edd9f6e4a997424ed2ebca3484337db665b8bc27167f6472a444c2b8666"
+      },
+      "response": {
+        "status": 202,
+        "headers_recorded": false,
+        "file": "bodies/json_ingest.response",
+        "bytes": 769,
+        "sha256": "1b21fd92e87a21e5b6cbcd1693453d3ecf787df85017c6357acdc0833e0fe53c"
+      }
+    },
+    {
+      "id": "json_key_id_shaped",
+      "surface": "crash",
+      "operation": "ingestCrash",
+      "evidence": "receiver_admitted",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/crashes/ingest",
+        "path_template": "/api/v1/crashes/ingest",
+        "credential": "api_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/json_key_id_shaped.request",
+        "bytes": 429,
+        "sha256": "b3628f8bfc47ac3600d1b94a0c23742915c582eda5d4de6feb12505a5fbfc433"
+      },
+      "response": {
+        "status": 202,
+        "headers_recorded": false,
+        "file": "bodies/json_key_id_shaped.response",
+        "bytes": 800,
+        "sha256": "b777118dbf894e45c45bb61a76f3b3d9e6e753a3f402071c6b5493b486e39af2"
+      }
+    },
+    {
+      "id": "json_retired",
+      "surface": "crash",
+      "operation": "ingestCrash",
+      "evidence": "receiver_refused",
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/crashes/ingest",
+        "path_template": "/api/v1/crashes/ingest",
+        "credential": "api_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/json_retired.request",
+        "bytes": 408,
+        "sha256": "c463151021b4a5e62ffd70cea1fb5e25017ee1d3606775b91932f893be34e3e6"
+      },
+      "response": {
+        "status": 400,
+        "headers_recorded": false,
+        "file": "bodies/json_retired.response",
+        "bytes": 107,
+        "sha256": "cb27de6598bbe77626c2dbdd88fb7ad6439ae40b2ce0d2200a5823d793441e24"
+      }
+    },
+    {
+      "id": "json_identity_claimed_user",
+      "surface": "identity",
+      "operation": "ingestCrash",
+      "evidence": "receiver_admitted",
+      "see_also": [
+        "json_ingest",
+        "json_identity_user_only",
+        "identity-batch-user-and-anonymous"
+      ],
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "observation": "stored_actor_kind=anon actor_is_anonymous_id=true actor_is_claimed_user=false",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/crashes/ingest",
+        "path_template": "/api/v1/crashes/ingest",
+        "credential": "api_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/json_identity_claimed_user.request",
+        "bytes": 456,
+        "sha256": "1267541e544b999cf24c25fcdd7a67c01f083545f7d516ec2a80daf4a4454c2d"
+      },
+      "response": {
+        "status": 202,
+        "headers_recorded": false,
+        "file": "bodies/json_identity_claimed_user.response",
+        "bytes": 769,
+        "sha256": "1b21fd92e87a21e5b6cbcd1693453d3ecf787df85017c6357acdc0833e0fe53c"
+      }
+    },
+    {
+      "id": "json_identity_user_only",
+      "surface": "identity",
+      "operation": "ingestCrash",
+      "evidence": "receiver_admitted",
+      "see_also": [
+        "json_ingest",
+        "json_identity_claimed_user"
+      ],
+      "operation_named_by": "openapi",
+      "byte_exact": true,
+      "observation": "stored_actor_kind=none actor_is_anonymous_id=false actor_is_claimed_user=false",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/crashes/ingest",
+        "path_template": "/api/v1/crashes/ingest",
+        "credential": "api_key",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "file": "bodies/json_identity_user_only.request",
+        "bytes": 425,
+        "sha256": "6b0a73209cc7ee0089679d43095d7ec1bf1ef632eb018c3b09d0422ab2462748"
+      },
+      "response": {
+        "status": 202,
+        "headers_recorded": false,
+        "file": "bodies/json_identity_user_only.response",
+        "bytes": 769,
+        "sha256": "1b21fd92e87a21e5b6cbcd1693453d3ecf787df85017c6357acdc0833e0fe53c"
+      }
+    }
+  ],
+  "corpus_sha256": "bd63843c26a31f1c0ef7750352f983a3c8fe0321d1ce192e331fdb373fbe7340"
+}

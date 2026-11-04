@@ -24,7 +24,7 @@ requests and their uncompressed retries; request-specific headers cannot replace
 - An owner-scoped reclaim epoch fences stale revision-one captures, preventing a retired withdrawal from becoming a fresh destructive operation after its history is removed. Weak capture metadata follows live canonical frames. A staged initial append that never attempts Write releases its capture; an attempted write requires proof of zero bytes. Ordinary replay retains the epoch, while completing prepared reclamation advances it. Fresh post-reclaim admissions remain possible.
 - Experiment cache fences, emissions, progress, mint fallback and lifecycle matching share the journal owner's confirmed namespace, separately from conservative condemnation. Regressions pair independent case-distinct directories with canonical and confirmed-alias controls. Permitted initialized consumers establish the ordinary cache root before binding; closed gates and flag-off consumers create no directory or journal. Assignment clear serializes its availability check, deletion and corrupt-marker cleanup with sibling publication.
 - When both lifecycle identities remain unbound, a matching configured namespace and tenant scope can revoke the enabled predecessor without I/O or directory creation. This pre-binding match grants no cache or projection authority; independent directories and tenants remain independent.
-- `0.15.0-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
+- `0.16.0-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
 - Before that tag is published, use the local-package flow for this candidate. The public API is unstable before v1.
 - Implemented and tested: app-first event tracking, sessions, bounded async batching over UnityWebRequest, durable offline spools (analytics events AND crash reports) with resend on next launch, bearer auth, consent-first analytics gating, an independent persisted crash-reporting opt-out, sanitized crash capture, and an ETag/If-None-Match remote-config disk cache.
 - `IngestUrl` defaults to `https://ingest.shardpilot.com` and a build that omits it uses that. The IDENTIFIERS and KEYS in the samples below are placeholders: `WorkspaceKey`, `AppKey`, `EnvironmentKey` and `PublishableKey` come from your ShardPilot workspace and resolve to nothing until you supply your own.
@@ -41,21 +41,21 @@ requests and their uncompressed retries; request-specific headers cannot replace
 
 ## Installation
 
-After `v0.15.0-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
+After `v0.16.0-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
 
 ```json
 {
   "dependencies": {
-    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.15.0-alpha"
+    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.0-alpha"
   }
 }
 ```
 
-The snippet targets the `v0.15.0-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
+The snippet targets the `v0.16.0-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
 
 ## Quick start
 
-This quickstart uses the `0.15.0-alpha` scope API: `WorkspaceKey`,
+This quickstart uses the `0.16.0-alpha` scope API: `WorkspaceKey`,
 `AppKey` and `EnvironmentKey`. The earlier `v0.11.0-alpha` tag uses `*Id`
 settings; current source has no aliases for those retired property names.
 
@@ -575,6 +575,26 @@ unchanged `event_too_large` event.
 
 ## Identity & consent
 
+### Initialize from a saved host choice (v0.16.0-alpha)
+
+Call `ShardPilotSdk.InitializeWithConsent(config, decision, crashReportingEnabled, notice)` on the
+Unity main thread before starting a client. Use the same target configuration you would use for
+`Initialize`. Supply the host's current saved analytics choice and separate crash choice.
+Keep the SDK stopped while the choice is unavailable. Forced-minor startup requires crash off
+and a configuration without a crash key or crash capture hooks.
+
+A new grant receipt requires a valid notice version, locale and policy version. If `notice` is
+omitted, the SDK can reuse valid retained provenance for this actor and scope. If there is no
+valid tuple when a new grant receipt is needed, startup fails. A denial or forced-minor denial
+with a malformed notice drops the tuple and reports `consent_notice_invalid` as a warning after
+successful reconciliation. Ordinary denial can keep crash reporting enabled without analytics
+context. An existing forced-minor restriction cannot be overridden by a startup grant.
+
+On success, `ShardPilotSdk.Client` is available and dispatch can run. The result confirms local
+reconciliation and durable receipt handling. It does not acknowledge remote delivery. A failed
+call leaves the facade unpublished. A duplicate call or an active client is refused. Check the
+result and correct the reported input, ownership or persistence error before retrying.
+
 **Preview:** regional consent preparation validates replies while every decision remains strict and unused.
 
 `ShardPilotSdk.PrepareConsentPolicy(context, callback)` is available before
@@ -836,7 +856,7 @@ In current source, a positive `Retry-After` on `429` or `5xx` also opens an in-m
 ## Experiments (dark by default)
 
 **Explicit application availability:** this flow was introduced in `0.11.0-alpha`;
-the examples below use the `0.15.0-alpha` scope API. Install its tag after
+the examples below use the `0.16.0-alpha` scope API. Install its tag after
 publication, or use UPM's local-package flow for the candidate. Before enabling it
 against a deployment, the owner must verify the assignment and application
 routes, publishable-key permission, and sealed-fact ingest support.
@@ -1041,7 +1061,7 @@ The worker has two implementations selected at compile time: a background `Threa
 
 ## Build & test
 
-Public snapshots contain the runtime, editor integration, samples and package documentation.
+Public snapshots contain the runtime, editor integration, samples, documentation and wire conformance tests.
 Contributor tooling and its instructions are excluded from the snapshot.
 
 Public package workflows validate manifests and committed asset metadata and scan
@@ -1069,6 +1089,13 @@ and checks the tag before writing notes.
 
 Source runners use a package-qualified test-support symbol so unrelated consumer
 defines do not enable runtime test registries.
+
+The EditMode wire conformance tests replay the pinned public corpus through
+SDK serializers and response handlers. In the Unity Test Runner, enable this
+package's tests and filter for `WireConformance`. The same cases run in the
+headless suite. Each case identifies its captured wire data and reports any
+limits on reproducing the request. Remote Config replays isolate retry windows.
+The tests run offline.
 
 ## Compatibility
 

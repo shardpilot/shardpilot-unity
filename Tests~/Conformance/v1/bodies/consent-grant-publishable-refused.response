@@ -1,0 +1,1 @@
+{"error":{"code":"forbidden","message":"publishable client keys may record consent denials only","details":[{"field":"categories","code":"consent_grant_requires_verified_credential","message":"a publishable client key cannot GRANT consent; grants require a verified credential — denial receipts (all categories false) are accepted"}]}}
