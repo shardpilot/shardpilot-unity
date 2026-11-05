@@ -24,7 +24,7 @@ requests and their uncompressed retries; request-specific headers cannot replace
 - An owner-scoped reclaim epoch fences stale revision-one captures, preventing a retired withdrawal from becoming a fresh destructive operation after its history is removed. Weak capture metadata follows live canonical frames. A staged initial append that never attempts Write releases its capture; an attempted write requires proof of zero bytes. Ordinary replay retains the epoch, while completing prepared reclamation advances it. Fresh post-reclaim admissions remain possible.
 - Experiment cache fences, emissions, progress, mint fallback and lifecycle matching share the journal owner's confirmed namespace, separately from conservative condemnation. Regressions pair independent case-distinct directories with canonical and confirmed-alias controls. Permitted initialized consumers establish the ordinary cache root before binding; closed gates and flag-off consumers create no directory or journal. Assignment clear serializes its availability check, deletion and corrupt-marker cleanup with sibling publication.
 - When both lifecycle identities remain unbound, a matching configured namespace and tenant scope can revoke the enabled predecessor without I/O or directory creation. This pre-binding match grants no cache or projection authority; independent directories and tenants remain independent.
-- `0.16.0-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
+- `0.16.1-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
 - Before that tag is published, use the local-package flow for this candidate. The public API is unstable before v1.
 - Implemented and tested: app-first event tracking, sessions, bounded async batching over UnityWebRequest, durable offline spools (analytics events AND crash reports) with resend on next launch, bearer auth, consent-first analytics gating, an independent persisted crash-reporting opt-out, sanitized crash capture, and an ETag/If-None-Match remote-config disk cache.
 - `IngestUrl` defaults to `https://ingest.shardpilot.com` and a build that omits it uses that. The IDENTIFIERS and KEYS in the samples below are placeholders: `WorkspaceKey`, `AppKey`, `EnvironmentKey` and `PublishableKey` come from your ShardPilot workspace and resolve to nothing until you supply your own.
@@ -41,21 +41,21 @@ requests and their uncompressed retries; request-specific headers cannot replace
 
 ## Installation
 
-After `v0.16.0-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
+After `v0.16.1-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
 
 ```json
 {
   "dependencies": {
-    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.0-alpha"
+    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.1-alpha"
   }
 }
 ```
 
-The snippet targets the `v0.16.0-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
+The snippet targets the `v0.16.1-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
 
 ## Quick start
 
-This quickstart uses the `0.16.0-alpha` scope API: `WorkspaceKey`,
+This quickstart uses the `0.16.1-alpha` scope API: `WorkspaceKey`,
 `AppKey` and `EnvironmentKey`. The earlier `v0.11.0-alpha` tag uses `*Id`
 settings; current source has no aliases for those retired property names.
 
@@ -595,6 +595,15 @@ reconciliation and durable receipt handling. It does not acknowledge remote deli
 call leaves the facade unpublished. A duplicate call or an active client is refused. Check the
 result and correct the reported input, ownership or persistence error before retrying.
 
+### Start undecided for non-objection recording (v0.16.1-alpha)
+
+`ShardPilotSdk.InitializeForNonObjection(config, crashReportingEnabled)` starts with analytics
+consent Unknown where the host records non-objection. It reconciles like `InitializeWithConsent`:
+the crash choice is saved before any dispatch, and the facade and crash hooks are published only
+after reconciliation. A saved analytics decision or forced-minor restriction is never discarded:
+startup fails with `startup_consent_decided` or `consent_forced_minor`, so start with that decision
+instead. Ordinary analytics stays closed until a current `RecordNonObjection` acknowledgement.
+
 **Preview:** regional consent preparation validates replies while every decision remains strict and unused.
 
 `ShardPilotSdk.PrepareConsentPolicy(context, callback)` is available before
@@ -856,7 +865,7 @@ In current source, a positive `Retry-After` on `429` or `5xx` also opens an in-m
 ## Experiments (dark by default)
 
 **Explicit application availability:** this flow was introduced in `0.11.0-alpha`;
-the examples below use the `0.16.0-alpha` scope API. Install its tag after
+the examples below use the `0.16.1-alpha` scope API. Install its tag after
 publication, or use UPM's local-package flow for the candidate. Before enabling it
 against a deployment, the owner must verify the assignment and application
 routes, publishable-key permission, and sealed-fact ingest support.

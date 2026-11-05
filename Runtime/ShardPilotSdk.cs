@@ -152,9 +152,18 @@ namespace ShardPilot
             ShardPilotConsentDecision decision, bool crashReportingEnabled, ShardPilotConsentNotice? notice = null)
             => InitializeWithConsentCore(config, decision, crashReportingEnabled, notice, c => ShardPilotClient.CreateForStartup(c));
 
+        /// <summary>Starts with Unknown analytics consent and the host's separate crash choice.
+        /// Ordinary analytics still requires a current RecordNonObjection acknowledgement.</summary>
+        public static ShardPilotResult InitializeForNonObjection(ShardPilotConfig config, bool crashReportingEnabled)
+            => InitializeForNonObjectionCore(config, crashReportingEnabled, c => ShardPilotClient.CreateForStartup(c));
+
+        internal static ShardPilotResult InitializeForNonObjectionCore(ShardPilotConfig config, bool crashEnabled,
+            Func<ShardPilotConfig, ShardPilotClient> create)
+            => InitializeWithConsentCore(config, ShardPilotConsentDecision.Unset, crashEnabled, null, create, true);
+
         internal static ShardPilotResult InitializeWithConsentCore(ShardPilotConfig config,
             ShardPilotConsentDecision decision, bool crashEnabled, ShardPilotConsentNotice? notice,
-            Func<ShardPilotConfig, ShardPilotClient> create)
+            Func<ShardPilotConfig, ShardPilotClient> create, bool nonObjection = false)
         {
             if (!ShardPilotHostLifecycle.IsMainThread) return ShardPilotClient.StartupFailure("startup_main_thread_required");
             if (Interlocked.CompareExchange(ref _startupInProgress, 1, 0) != 0)
@@ -164,7 +173,9 @@ namespace ShardPilot
                 lock (Gate)
                 {
                     if (_client != null) return ShardPilotClient.StartupFailure("startup_active_client");
-                    if (decision != ShardPilotConsentDecision.Granted && decision != ShardPilotConsentDecision.Denied &&
+                    // Only the non-objection entry point starts undecided (Unknown).
+                    if (nonObjection ? decision != ShardPilotConsentDecision.Unset :
+                        decision != ShardPilotConsentDecision.Granted && decision != ShardPilotConsentDecision.Denied &&
                         decision != ShardPilotConsentDecision.DeniedForcedMinor)
                         return ShardPilotClient.StartupFailure("invalid_consent");
                     if (config == null) return ShardPilotClient.StartupFailure("startup_invalid_config");

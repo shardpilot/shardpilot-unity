@@ -144,7 +144,14 @@ namespace ShardPilot
             // A modern, current-actor record already embodies a previously reconciled choice.
             var sameDecision = prior != null && !prior.Legacy && prior.State == expected &&
                 prior.AnonymousId == _config.AnonymousId && _consentState == expected;
-            if (!sameDecision || notice.HasValue)
+            if (decision == ShardPilotConsentDecision.Unset)
+            {
+                // Undecided start: nothing to record, and a saved decision is never discarded,
+                // even one a scoped downgrade demoted to Unknown for this client.
+                if (_consentState != ShardPilotConsentState.Unknown || (prior != null && prior.State != ShardPilotConsentState.Unknown))
+                    return StartupFailure("startup_consent_decided");
+            }
+            else if (!sameDecision || notice.HasValue)
             {
                 if (decision == ShardPilotConsentDecision.Granted && !notice.HasValue)
                 {
