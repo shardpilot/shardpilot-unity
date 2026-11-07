@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.16.1-alpha]
+## [0.16.2-alpha]
 
 - Analytics and crash capture with durable offline storage and consent controls.
 - Ordinary analytics denial allows crash reports without analytics identity or breadcrumbs.

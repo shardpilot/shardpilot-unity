@@ -4,7 +4,7 @@ namespace ShardPilot
 {
     internal static class ShardPilotSdkIdentity
     {
-        internal const string Version = "0.16.1-alpha";
+        internal const string Version = "0.16.2-alpha";
         internal const string HeaderName = "X-ShardPilot-SDK";
         internal const string HeaderValue = "unity/" + Version;
 

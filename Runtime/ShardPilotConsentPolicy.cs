@@ -15,6 +15,8 @@ namespace ShardPilot
         public string Store, StoreRegion;
         public ShardPilotConsentPolicyAgeBand AgeBand;
         public bool Advisory;
+        /// <summary>Optional total preparation deadline, a whole number of seconds from 1 to 10; null keeps two seconds.</summary>
+        public TimeSpan? Deadline;
     }
 
     public sealed class ShardPilotConsentPolicyAgeBand
@@ -79,6 +81,7 @@ namespace ShardPilot
         internal static Func<double> ClockForTesting;
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
         private static readonly object OrderGate = new object();
+        private const double DefaultDeadlineSeconds = 2, MinDeadlineSeconds = 1, MaxDeadlineSeconds = 10;
         private static string _context;
         private static long _epoch, _dispatch, _latest;
 
@@ -103,6 +106,7 @@ namespace ShardPilot
             }
             catch { settle("invalid_request"); return; }
 
+            var limit = context.Deadline?.TotalSeconds ?? DefaultDeadlineSeconds;
             var clock = ClockForTesting ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
             var started = ReadClock(clock);
             long epoch, dispatch = 0;
@@ -118,14 +122,14 @@ namespace ShardPilot
             {
                 Method = "POST", Url = root + "/api/cp/v1/consent/policy",
                 ContentType = "application/json", Body = body,
-                Timeout = TimeSpan.FromSeconds(2), RefuseRedirects = true
+                Timeout = TimeSpan.FromSeconds(limit), RefuseRedirects = true
             };
             request.BeforeSend = () =>
             {
                 var now = ReadClock(clock);
-                var reason = PendingReason(now, started, epoch, dispatch, false);
+                var reason = PendingReason(now, started, limit, epoch, dispatch, false);
                 if (reason != null) { settle(reason); return false; }
-                request.Timeout = TimeSpan.FromSeconds(Math.Max(0.001, started + 2 - now));
+                request.Timeout = TimeSpan.FromSeconds(Math.Max(0.001, started + limit - now));
                 return true;
             };
             try
@@ -136,7 +140,7 @@ namespace ShardPilot
                 sender.Send(request, response =>
                 {
                     var arrived = ReadClock(clock);
-                    var reason = PendingReason(arrived, started, epoch, dispatch, true);
+                    var reason = PendingReason(arrived, started, limit, epoch, dispatch, true);
                     ShardPilotConsentPolicyAdvisory advisory = null;
                     if (reason == null) reason = ResponseReason(response, body, arrived, out advisory);
                     settle(reason, advisory);
@@ -151,16 +155,16 @@ namespace ShardPilot
             catch { return double.NaN; }
         }
 
-        private static string ClockRefusal(double now, double started)
+        private static string ClockRefusal(double now, double started, double limit)
         {
             if (double.IsNaN(now)) return "clock_unavailable";
             if (now < started) return "clock_regressed";
-            return now > started + 2 ? "deadline_exceeded" : null;
+            return now > started + limit ? "deadline_exceeded" : null;
         }
 
-        private static string PendingReason(double now, double started, long epoch, long dispatch, bool complete)
+        private static string PendingReason(double now, double started, double limit, long epoch, long dispatch, bool complete)
         {
-            var clock = ClockRefusal(now, started);
+            var clock = ClockRefusal(now, started, limit);
             if (clock == "clock_unavailable" || clock == "clock_regressed") return clock;
             lock (OrderGate)
             {
@@ -319,6 +323,8 @@ namespace ShardPilot
                 !Bounded(context.WorkspaceKey, 64) || !Bounded(context.AppKey, 64) ||
                 !Bounded(context.EnvironmentKey, 64) || !Version(context.AppVersion) ||
                 !Bounded(context.Locale, 35) || string.IsNullOrEmpty(context.Platform) || context.StoreRegion != null) return false;
+            // Whole seconds only: UnityWebRequest.timeout counts whole seconds and cannot enforce a fraction.
+            if (context.Deadline is TimeSpan d && !(d.TotalSeconds >= MinDeadlineSeconds && d.TotalSeconds <= MaxDeadlineSeconds && d.TotalSeconds == Math.Floor(d.TotalSeconds))) return false;
             if (context.Store != null && context.Store != "steam" && context.Store != "apple" &&
                 context.Store != "google_play" && context.Store != "standalone") return false;
             var age = context.AgeBand;

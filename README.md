@@ -24,7 +24,7 @@ requests and their uncompressed retries; request-specific headers cannot replace
 - An owner-scoped reclaim epoch fences stale revision-one captures, preventing a retired withdrawal from becoming a fresh destructive operation after its history is removed. Weak capture metadata follows live canonical frames. A staged initial append that never attempts Write releases its capture; an attempted write requires proof of zero bytes. Ordinary replay retains the epoch, while completing prepared reclamation advances it. Fresh post-reclaim admissions remain possible.
 - Experiment cache fences, emissions, progress, mint fallback and lifecycle matching share the journal owner's confirmed namespace, separately from conservative condemnation. Regressions pair independent case-distinct directories with canonical and confirmed-alias controls. Permitted initialized consumers establish the ordinary cache root before binding; closed gates and flag-off consumers create no directory or journal. Assignment clear serializes its availability check, deletion and corrupt-marker cleanup with sibling publication.
 - When both lifecycle identities remain unbound, a matching configured namespace and tenant scope can revoke the enabled predecessor without I/O or directory creation. This pre-binding match grants no cache or projection authority; independent directories and tenants remain independent.
-- `0.16.1-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
+- `0.16.2-alpha` is the current release candidate; its changes are recorded under that version in the CHANGELOG. The owner publishes its tag after the version bump merges.
 - Before that tag is published, use the local-package flow for this candidate. The public API is unstable before v1.
 - Implemented and tested: app-first event tracking, sessions, bounded async batching over UnityWebRequest, durable offline spools (analytics events AND crash reports) with resend on next launch, bearer auth, consent-first analytics gating, an independent persisted crash-reporting opt-out, sanitized crash capture, and an ETag/If-None-Match remote-config disk cache.
 - `IngestUrl` defaults to `https://ingest.shardpilot.com` and a build that omits it uses that. The IDENTIFIERS and KEYS in the samples below are placeholders: `WorkspaceKey`, `AppKey`, `EnvironmentKey` and `PublishableKey` come from your ShardPilot workspace and resolve to nothing until you supply your own.
@@ -41,21 +41,21 @@ requests and their uncompressed retries; request-specific headers cannot replace
 
 ## Installation
 
-After `v0.16.1-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
+After `v0.16.2-alpha` is published, add it as a UPM git dependency in your project's Packages/manifest.json:
 
 ```json
 {
   "dependencies": {
-    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.1-alpha"
+    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.2-alpha"
   }
 }
 ```
 
-The snippet targets the `v0.16.1-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
+The snippet targets the `v0.16.2-alpha` release tag. Until it is published, add the package folder through Unity Package Manager's local-package flow. Requires Unity `2022.3` or later.
 
 ## Quick start
 
-This quickstart uses the `0.16.1-alpha` scope API: `WorkspaceKey`,
+This quickstart uses the `0.16.2-alpha` scope API: `WorkspaceKey`,
 `AppKey` and `EnvironmentKey`. The earlier `v0.11.0-alpha` tag uses `*Id`
 settings; current source has no aliases for those retired property names.
 
@@ -611,7 +611,8 @@ instead. Ordinary analytics stays closed until a current `RecordNonObjection` ac
 `ShardPilotConsentPolicyContext` with `AppUrl`,
 `WorkspaceKey`, `AppKey`, `EnvironmentKey`, `AppVersion`, `Locale` and `Platform`.
 It posts an identifier-free version 3 request to `{AppUrl}/api/cp/v1/consent/policy`.
-The request freezes those values, uses a two-second deadline and refuses redirects.
+The request freezes those values, uses a two-second total deadline and refuses redirects.
+Optional `Deadline` replaces the two seconds with a whole number of seconds from 1 to 10, because the Unity transport counts whole seconds; any other value is `invalid_request`.
 Use an HTTPS origin; HTTP is accepted only for loopback hosts.
 
 Optional `Store` is exactly `steam`, `apple`, `google_play` or `standalone`;
@@ -865,7 +866,7 @@ In current source, a positive `Retry-After` on `429` or `5xx` also opens an in-m
 ## Experiments (dark by default)
 
 **Explicit application availability:** this flow was introduced in `0.11.0-alpha`;
-the examples below use the `0.16.1-alpha` scope API. Install its tag after
+the examples below use the `0.16.2-alpha` scope API. Install its tag after
 publication, or use UPM's local-package flow for the candidate. Before enabling it
 against a deployment, the owner must verify the assignment and application
 routes, publishable-key permission, and sealed-fact ingest support.
