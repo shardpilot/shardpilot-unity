@@ -277,7 +277,7 @@ namespace ShardPilot
                     ConsentPersistFailed = (ulong)Interlocked.Read(ref _consentPersistFailed),
                     ConsentOutboxEvicted = (ulong)Interlocked.Read(ref _consentOutboxEvicted),
                     ConsentOutboxPersistFailed = (ulong)Interlocked.Read(ref _consentOutboxPersistFailed),
-                    ConsentWritesUnpersistedAtShutdown = (ulong)Interlocked.Read(ref _consentWritesUnpersistedAtShutdown),
+                    ConsentWritesUnpersistedAtShutdown = (ulong)_consentWritesUnpersistedAtShutdown,
                     LastConsentError = _lastConsentError,
                     LastError = _lastError
                 };
@@ -417,9 +417,16 @@ namespace ShardPilot
             Interlocked.Increment(ref _consentOutboxPersistFailed);
         }
 
-        public void RecordConsentWritesUnpersistedAtShutdown()
+        public bool RecordConsentWritesUnpersistedAtShutdown()
         {
-            Interlocked.Increment(ref _consentWritesUnpersistedAtShutdown);
+            lock (_gate)
+            {
+                if (_consentWritesUnpersistedAtShutdown != 0) return false;
+                _lastError = Diagnostic("consent_unpersisted_at_shutdown");
+                Interlocked.Increment(ref _failedBatches);
+                _consentWritesUnpersistedAtShutdown = 1;
+                return true;
+            }
         }
 
         /// <summary>

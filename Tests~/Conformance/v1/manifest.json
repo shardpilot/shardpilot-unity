@@ -887,8 +887,8 @@
           "Content-Type": "application/json; charset=utf-8"
         },
         "file": "bodies/resolver.resolved-strict-200.response",
-        "bytes": 1325,
-        "sha256": "96a0b57b1abe7ad98fbf0884e873ab1c6a19a51caba84908ddd98f8620905405"
+        "bytes": 1255,
+        "sha256": "32ab657e1e05ed36a00d97b8d051ff88607d4786c7f5383266eed57422582182"
       }
     },
     {
@@ -917,8 +917,8 @@
           "Content-Type": "application/json; charset=utf-8"
         },
         "file": "bodies/resolver.advisory-admitted-200.response",
-        "bytes": 2235,
-        "sha256": "78d260dc15bb00f482ddcc6f061b0a86b11c2bcb665e604f159f35e0410896e2"
+        "bytes": 2165,
+        "sha256": "74c47858182bc41bdd279a1382bd6c63a80e82183b19312fd58e3b64dd28a6ec"
       }
     },
     {
@@ -947,8 +947,8 @@
           "Content-Type": "application/json; charset=utf-8"
         },
         "file": "bodies/resolver.locale-mixed-case-200.response",
-        "bytes": 1325,
-        "sha256": "96a0b57b1abe7ad98fbf0884e873ab1c6a19a51caba84908ddd98f8620905405"
+        "bytes": 1255,
+        "sha256": "32ab657e1e05ed36a00d97b8d051ff88607d4786c7f5383266eed57422582182"
       }
     },
     {
@@ -977,8 +977,8 @@
           "Content-Type": "application/json; charset=utf-8"
         },
         "file": "bodies/resolver.refusal-invalid-scope-400.response",
-        "bytes": 1336,
-        "sha256": "fc9cab63180c7f2a57b8654202586ac7255b1a71b92dd2c64f0f573181424563"
+        "bytes": 1266,
+        "sha256": "808be00525b0968e3c05505313fa1438a68a7646faabd468538b8c5ede3cd298"
       }
     },
     {
@@ -1007,8 +1007,8 @@
           "Content-Type": "application/json; charset=utf-8"
         },
         "file": "bodies/resolver.refusal-retired-key-400.response",
-        "bytes": 1338,
-        "sha256": "a43527878da4c7392d387533fa0957a35230865dbeb126815f9bf8c4e3631a18"
+        "bytes": 1268,
+        "sha256": "b943429f40ce106f9703dacd67799ee715e7a17217577a0e3b1422257ea9c6c1"
       }
     },
     {
@@ -1037,8 +1037,8 @@
           "Content-Type": "application/json; charset=utf-8"
         },
         "file": "bodies/resolver.refusal-unknown-scope-400.response",
-        "bytes": 1336,
-        "sha256": "fc9cab63180c7f2a57b8654202586ac7255b1a71b92dd2c64f0f573181424563"
+        "bytes": 1266,
+        "sha256": "808be00525b0968e3c05505313fa1438a68a7646faabd468538b8c5ede3cd298"
       }
     },
     {
@@ -1524,5 +1524,5 @@
       }
     }
   ],
-  "corpus_sha256": "bd63843c26a31f1c0ef7750352f983a3c8fe0321d1ce192e331fdb373fbe7340"
+  "corpus_sha256": "cd3affb4c1732e18f83e069e7ad3ee7de6b21790e79b9e8e7fda92dd24fa483d"
 }

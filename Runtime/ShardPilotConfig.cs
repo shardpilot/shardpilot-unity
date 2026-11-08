@@ -480,6 +480,10 @@ namespace ShardPilot
         /// </summary>
         public TimeSpan HangWatchdogThreshold { get; set; } = DefaultHangWatchdogThreshold;
 
+#if SHARDPILOT_SDK_TEST_SUPPORT
+        internal Action<bool> BenchPublishSelectedForTesting;
+#endif
+
         public ShardPilotConfig CloneWithDefaults()
         {
             var clone = (ShardPilotConfig)MemberwiseClone();

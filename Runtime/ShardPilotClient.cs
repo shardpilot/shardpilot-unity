@@ -494,7 +494,6 @@ namespace ShardPilot
         private bool _closeDeadlineReached;
         private ShardPilotConsent.DecisionWork _closingDecision;
         private bool ClosingDecisionPending => Volatile.Read(ref _closingDecision) is { Completed: false };
-        private int _consentUnpersistedReported;
         // Non-null while a close queues the session end it claimed: closes
         // arriving meanwhile wait here, so none can drain and stop the worker
         // before that end enters. Guarded by _gate.
@@ -1200,6 +1199,17 @@ namespace ShardPilot
         // window and prove the atomic teardown re-check defers the close.
         // Never assigned in production.
         internal Action CloseTeardownPreStopHookForTesting;
+
+        // Test-only hold before shutdown diagnostics become visible.
+        internal Action ConsentShutdownBeforeDiagnosticsForTesting;
+        internal Action<string> DrainCompletionSourceForTesting;
+        [System.Diagnostics.Conditional("SHARDPILOT_SDK_TEST_SUPPORT")]
+        private void ObserveBenchPublish(bool close)
+        {
+#if SHARDPILOT_SDK_TEST_SUPPORT
+            _config.BenchPublishSelectedForTesting?.Invoke(close);
+#endif
+        }
 
         public ShardPilotClient(ShardPilotConfig config)
             : this(CaptureHostConstruction(config, true)) { }
@@ -15534,13 +15544,13 @@ namespace ShardPilot
                 close,
                 holds,
                 result => CompleteRejections(result, rejections),
-                false);
+                false) { CompletionSourceForTesting = !close && !holds ? DrainCompletionSourceForTesting : null };
             SessionEndClaim closeEnd = null;
             lock (_gate)
             {
                 if (_workerStopped || (!close && (holds ? IntakeClosed : _closed)))
                 {
-                    request.Complete(StoppedResultFor(request));
+                    request.CompleteFrom(StoppedResultFor(request), "caller");
                     return request.Task;
                 }
 
@@ -16143,6 +16153,7 @@ namespace ShardPilot
 
                     if (requests != null)
                     {
+                        ObserveBenchPublish(closeArrived);
                         _passTerminal = null;
                         var result = PublishUntilDrained(batch, consentEpoch);
                         if (closeArrived && !result.Success && result.Retryable && batch.Count > 0)
@@ -16348,6 +16359,7 @@ namespace ShardPilot
 
                     if (batch.Count >= _config.BatchSize)
                     {
+                        ObserveBenchPublish(false);
                         publishImmediately = false;
                         var result = PublishCurrentBatch(batch, consentEpoch);
                         if (!result.Success && result.Retryable)
@@ -16399,6 +16411,7 @@ namespace ShardPilot
                     }
                     if (publishImmediately || DateTime.UtcNow >= partialBatchDeadline)
                     {
+                        ObserveBenchPublish(false);
                         publishImmediately = false;
                         partialBatchDeadline = DateTime.MinValue;
                         var result = PublishCurrentBatch(batch, consentEpoch);
@@ -18371,17 +18384,15 @@ namespace ShardPilot
         /// </summary>
         private ShardPilotResult ConsentUnpersistedAtShutdown()
         {
-            // Every answer publishes the witness before host diagnostics;
-            // the reporting flag only suppresses duplicate diagnostics.
+            // Every answer publishes the witness before reporting diagnostics.
             lock (_gate)
             {
                 _closingDecision?.KeepDenial(_settingsStore, _config.AnonymousId);
                 KeepUnbackedDenialForProcessLocked();
             }
-            if (Interlocked.Exchange(ref _consentUnpersistedReported, 1) == 0)
+            ConsentShutdownBeforeDiagnosticsForTesting?.Invoke();
+            if (_stats.RecordConsentWritesUnpersistedAtShutdown())
             {
-                _stats.RecordFailure("consent_unpersisted_at_shutdown");
-                _stats.RecordConsentWritesUnpersistedAtShutdown();
                 SafeLog("shardpilot close tore down with consent writes still owed; a denial stays in force for this process");
             }
 
@@ -18655,6 +18666,7 @@ namespace ShardPilot
             private readonly TimeSpan _timeout;
             private readonly System.Diagnostics.Stopwatch _age = System.Diagnostics.Stopwatch.StartNew();
             private readonly Func<ShardPilotResult, ShardPilotResult> _withRejections;
+            internal Action<string> CompletionSourceForTesting;
             private int _completionClaimed;
 
             /// <summary>
@@ -18721,9 +18733,9 @@ namespace ShardPilot
                     }
 
                     // The deadline passed with work undelivered.
-                    Complete(answer ?? new ShardPilotResult(false, Holds && ReceiptGated
+                    CompleteFrom(answer ?? new ShardPilotResult(false, Holds && ReceiptGated
                         ? ShardPilotFlushCodes.ConsentReceiptPending
-                        : ShardPilotFlushCodes.Pending, true));
+                        : ShardPilotFlushCodes.Pending, true), "timer");
                 }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
                 // Publish the timer before a deadline can call Complete.
                 // Sub-millisecond timeouts may fire immediately on another thread.
@@ -18757,11 +18769,13 @@ namespace ShardPilot
                 get { return _completion.Task; }
             }
 
-            public void Complete(ShardPilotResult result)
+            public void Complete(ShardPilotResult result) => CompleteFrom(result, "worker");
+            internal void CompleteFrom(ShardPilotResult result, string source)
             {
                 // Finalizing the result retires its rejection observer. Only
                 // the completion that owns the answer may freeze that state.
                 if (Interlocked.CompareExchange(ref _completionClaimed, 1, 0) != 0) return;
+                CompletionSourceForTesting?.Invoke(source);
                 if (_completion.TrySetResult(_withRejections(result)))
                 {
                     _timer.Dispose();

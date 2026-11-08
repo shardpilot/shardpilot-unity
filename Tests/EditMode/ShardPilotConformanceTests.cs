@@ -18,9 +18,9 @@ namespace ShardPilot.Tests
     {
         private const string Root = "https://conformance.example";
         private const string Key = "sp_synthetic";
-        private const string CorpusHash = "bd63843c26a31f1c0ef7750352f983a3c8fe0321d1ce192e331fdb373fbe7340";
-        private const string ManifestHash = "cc260e6981e92098915977c54d6ce7afb2cb97ebd56ae5b71102f93a941205b3";
-        private const string AdvisoryHash = "78d260dc15bb00f482ddcc6f061b0a86b11c2bcb665e604f159f35e0410896e2";
+        private const string CorpusHash = "cd3affb4c1732e18f83e069e7ad3ee7de6b21790e79b9e8e7fda92dd24fa483d";
+        private const string ManifestHash = "89d8b31640d9caab8fa849577c537bf9cd0106ce7ca339d7e030e97102dabab6";
+        private const string AdvisoryHash = "74c47858182bc41bdd279a1382bd6c63a80e82183b19312fd58e3b64dd28a6ec";
         private const string AnonHeader = "X-ShardPilot-Anonymous-Id";
         private const string ReplyWitness = "the captured reply reached the SDK";
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);

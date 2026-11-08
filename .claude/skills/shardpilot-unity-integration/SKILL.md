@@ -46,23 +46,23 @@ native code) is not captured. The public API is unstable before v1. See
 
 ## Install
 
-After `v0.16.2-alpha` is published, add the package as a UPM git dependency in the project's
+After `v0.16.3-alpha` is published, add the package as a UPM git dependency in the project's
 Packages/manifest.json:
 
 ```json
 {
   "dependencies": {
-    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.2-alpha"
+    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.3-alpha"
   }
 }
 ```
 
 - Package name: `com.shardpilot.unity`. Requires Unity `2022.3` or later.
 - The `#v…` URL fragment pins the release tag; the owner creates release tags.
-  The candidate version is `0.16.2-alpha`; use a local package until its tag is published.
+  The candidate version is `0.16.3-alpha`; use a local package until its tag is published.
   CI matches this pin to `package.json`, not to the contents or existence of
   a tag. **`v0.11.0-alpha` includes the explicit application/sealed-fact
-  flow.** Unmarked API references below describe `0.16.2-alpha`.
+  flow.** Unmarked API references below describe `0.16.3-alpha`.
   Consent-policy preparation is **preview**: every reply returns the local
   strict fallback with `PlanUsed = false`; received policies are not adopted.
 - For local development, add the package folder through Unity Package
@@ -169,7 +169,7 @@ your normal secret-delivery path and keep placeholders in the repo.
 
 ## Initialize
 
-The following examples use the `0.16.2-alpha` scope API:
+The following examples use the `0.16.3-alpha` scope API:
 `WorkspaceKey`, `AppKey`, `EnvironmentKey`. Use a local package until its
 tag is published. The earlier `v0.11.0-alpha` tag uses
 `*Id` settings; the new source does not retain them as aliases.
@@ -838,4 +838,4 @@ integration code:
   band forcing decision; see the consent section for how it gates.
 - **WebGL**: no spools (in-memory only), and the worker runs as a
   frame-ticked coroutine.
-- **Release pin**: this guide targets `v0.16.2-alpha`, including request compression. Use a local package until that tag is published.
+- **Release pin**: this guide targets `v0.16.3-alpha`, including request compression. Use a local package until that tag is published.
