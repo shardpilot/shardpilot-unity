@@ -40,10 +40,12 @@ namespace ShardPilot
 
     /// <summary>
     /// A single non-accepted per-event outcome surfaced by the 202 batch
-    /// response (<c>events[]</c>): an <c>observed</c>, <c>rejected</c>, or
-    /// <c>suppressed_no_consent</c> verdict the server reached for one event
-    /// even though the batch as a whole succeeded. Accepted events are not
-    /// reported here.
+    /// response (<c>events[]</c>): the verdict the server reached for one
+    /// event even though the batch as a whole succeeded. The service reports
+    /// <c>rejected</c> (an event name that is not registered in the tracking
+    /// plan is rejected with code <c>schema_not_found</c>), <c>duplicate</c>
+    /// and consent suppression; any other status is kept as received.
+    /// Accepted events are not reported here.
     /// </summary>
     internal sealed class ShardPilotEventOutcome
     {
@@ -71,8 +73,9 @@ namespace ShardPilot
         /// Per-event statuses the server reported that were not
         /// <c>accepted</c>. Empty when every event was accepted. Surfaced
         /// through the SDK logger so integrators learn their events were
-        /// observed (unregistered), rejected (blocked/unknown/schema), or
-        /// suppressed by consent, instead of silently lost inside a 202.
+        /// rejected (unregistered name, blocked, unknown property or schema
+        /// mismatch), folded as duplicates, or suppressed by consent,
+        /// instead of silently lost inside a 202.
         /// </summary>
         public IReadOnlyList<ShardPilotEventOutcome> NonAcceptedOutcomes { get; set; }
     }

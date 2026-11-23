@@ -435,6 +435,7 @@ namespace ShardPilot
         private readonly string _crashEndpoint;
         private readonly string _tombstoneEndpoint;
         private long _nonFatalCrashCounter;
+        private long _nonFatalCrashAdmitted;
 
         /// <summary>
         /// Durable spool for crash reports, or null when disabled (the
@@ -468,6 +469,14 @@ namespace ShardPilot
         /// <c>_gate</c>.
         /// </summary>
         private DateTime _crashResendNotBefore = DateTime.MinValue;
+
+        /// <summary>The server-directed deadline the persisted marker holds,
+        /// published under <c>_gate</c> so a live send decided there sees it.</summary>
+        private DateTime _crashServerRetryAfterNotBefore = DateTime.MinValue;
+
+        // The fatal-reserve window: handled (non-fatal) reports only. Guarded by _gate.
+        private DateTime _crashHandledNotBefore = DateTime.MinValue;
+        private const string CrashFatalReserveError = "crash_fatal_reserve";
 
         /// <summary>
         /// Mode-B JWT cache + refresh state machine. Null in Mode A
@@ -1154,6 +1163,9 @@ namespace ShardPilot
         // inside the snapshot-to-dispatch window. Never assigned in
         // production.
         internal Action CrashPreDispatchHookForTesting;
+        internal Action CrashRetryAfterReadHookForTesting;
+        internal Action CrashRetryAfterPublishedHookForTesting;
+        internal Action CrashResendPassPreGateHookForTesting;
 
         // Test-only seam invoked AFTER a spool append's consent/settlement
         // snapshot but BEFORE the unlocked append itself (both in the
@@ -2584,6 +2596,7 @@ namespace ShardPilot
                 if (keepUnattributedCrashes && !purgeOwnCrashSpool)
                 {
                     _crashResendNotBefore = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config);
+                    _crashHandledNotBefore = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config, true);
                 }
                 else
                 {
@@ -2726,6 +2739,7 @@ namespace ShardPilot
                     // state does not purge the crash spool — its own opt-out
                     // gate and retention window govern it.
                     _crashResendNotBefore = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config);
+                    _crashHandledNotBefore = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config, true);
                 }
             }
 
@@ -5818,13 +5832,27 @@ namespace ShardPilot
 
             // FATAL crashes bypass sampling entirely (consistent across the
             // ShardPilot SDKs): a terminating crash is always sent. Only NON-FATAL reports are
-            // rate-sampled to bound volume from a noisy handled error.
+            // rate-sampled and then capped per client to bound volume from a
+            // noisy handled error; a sampled-out report spends no cap.
             var fatal = crashEvent.Fatal;
             var nonFatalSampleOneIn = _config.CrashSampleEvery;
+            // A refused report hands its cap slot back, so only admitted reports spend the cap.
+            bool RefundCapSlot()
+            {
+                if (!fatal) Interlocked.Decrement(ref _nonFatalCrashAdmitted);
+                return false;
+            }
+
             if (!fatal && !ShouldEmitNonFatal(nonFatalSampleOneIn))
             {
                 _stats.RecordDropped(1);
                 return false;
+            }
+
+            if (!fatal && Interlocked.Increment(ref _nonFatalCrashAdmitted) > _config.CrashSessionMaxReports)
+            {
+                _stats.RecordDropped(1);
+                return RefundCapSlot();
             }
 
             ShardPilotCrashEvent prepared;
@@ -5870,7 +5898,7 @@ namespace ShardPilot
             {
                 _stats.RecordFailure(ex.Message);
                 SafeLog("shardpilot crash rejected: {0}", ex.Message);
-                return false;
+                return RefundCapSlot();
             }
 
             lock (_gate)
@@ -5890,7 +5918,7 @@ namespace ShardPilot
             {
                 _stats.RecordFailure(ex.Message);
                 SafeLog("shardpilot crash serialize failed: {0}", ex.Message);
-                return false;
+                return RefundCapSlot();
             }
 
             // ONE continuous dispatch-gate hold spans the write-ahead append
@@ -5914,7 +5942,7 @@ namespace ShardPilot
                         capturedCrashEpoch != _crashDisableEpoch || !CrashCollectionAllowedLocked)
                     {
                         _stats.RecordDropped(1);
-                        return false;
+                        return RefundCapSlot();
                     }
                 }
 
@@ -5943,7 +5971,7 @@ namespace ShardPilot
                 {
                     durability = ShardPilotCrashCaptureDurability.None;
                     _stats.RecordDropped(1);
-                    return false;
+                    return RefundCapSlot();
                 }
 
                 if (_httpSender == null)
@@ -6014,7 +6042,7 @@ namespace ShardPilot
                             RemoveRejectedCaptureFromOrphanedSpoolFile(prepared.CrashId);
                             durability = ShardPilotCrashCaptureDurability.None;
                             _stats.RecordDropped(1);
-                            return false;
+                            return RefundCapSlot();
                         }
 
                         settleHome = home;
@@ -6055,8 +6083,28 @@ namespace ShardPilot
                 var abortSend = false;
                 var denialLandedBeforeSend = false;
                 var disableLandedBeforeSend = false;
+                var retryAfterRemaining = TimeSpan.Zero;
+                // Only a server-directed Retry-After is stored; the local retry
+                // floor after a hint-less failure never holds a live send. The
+                // marker is published with the in-memory deadlines under _gate
+                // and cleared before them.
+                var storedRetryAfter = !handedToSuccessor && durability == ShardPilotCrashCaptureDurability.Spooled
+                    ? ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config)
+                    : DateTime.MinValue;
+                var storedReserve = !fatal && !handedToSuccessor && durability == ShardPilotCrashCaptureDurability.Spooled
+                    ? ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config, true)
+                    : DateTime.MinValue;
+                var retryAfterReadHook = CrashRetryAfterReadHookForTesting;
+                if (retryAfterReadHook != null) retryAfterReadHook();
                 lock (_gate)
                 {
+                    // One clock read decides the hold and its remaining window, so a
+                    // capture is either held or dispatched through the counting branch.
+                    var holdNow = _utcNow();
+                    // A handled capture also waits for the fatal-reserve window; a fatal one never does.
+                    if (storedReserve > _crashHandledNotBefore) _crashHandledNotBefore = storedReserve;
+                    var holdUntil = storedRetryAfter > _crashServerRetryAfterNotBefore ? storedRetryAfter : _crashServerRetryAfterNotBefore;
+                    if (!fatal && _crashHandledNotBefore > holdUntil) holdUntil = _crashHandledNotBefore;
                     // The crash opt-out is rechecked alongside close/denial: a
                     // SetCrashReportingEnabled(false) landing while this report
                     // was being prepared must stop the send AND remove the
@@ -6070,6 +6118,15 @@ namespace ShardPilot
                         denialLandedBeforeSend = capturedDenialEpoch != _consentDenialEpoch;
                         disableLandedBeforeSend = capturedCrashEpoch != _crashDisableEpoch || !CrashCollectionAllowedLocked;
                     }
+                    else if (!handedToSuccessor && durability == ShardPilotCrashCaptureDurability.Spooled &&
+                             holdNow < holdUntil)
+                    {
+                        // A stored Retry-After holds live sends as it holds resends: the
+                        // write-ahead record waits for the resend pass. The mirror covers a
+                        // re-arm that published after the unlocked marker read; the woken worker's gate gets the marker.
+                        if (storedRetryAfter > _crashResendNotBefore) _crashResendNotBefore = storedRetryAfter;
+                        retryAfterRemaining = holdUntil - holdNow;
+                    }
                     else
                     {
                         // Count this send as in flight while still holding the lock, so
@@ -6077,6 +6134,15 @@ namespace ShardPilot
                         // waits) or runs entirely after it — never races past it.
                         Interlocked.Increment(ref _pendingCrashSends);
                     }
+                }
+
+                if (!abortSend && retryAfterRemaining > TimeSpan.Zero)
+                {
+                    // The worker may sleep a whole flush interval over an empty
+                    // spool: wake it so its wait honours the resend deadline.
+                    WakeWorker();
+                    if (onSent != null) onSent(new ShardPilotResult(false, "crash_retry_after", true, retryAfterRemaining));
+                    return true;
                 }
 
                 if (!abortSend)
@@ -6107,7 +6173,7 @@ namespace ShardPilot
                         WakeWorker();
                         durability = ShardPilotCrashCaptureDurability.None;
                         _stats.RecordDropped(1);
-                        return false;
+                        return RefundCapSlot();
                     }
                 }
 
@@ -6152,7 +6218,20 @@ namespace ShardPilot
                             WakeWorker();
                             durability = ShardPilotCrashCaptureDurability.None;
                             _stats.RecordDropped(1);
-                            return false;
+                            return RefundCapSlot();
+                        }
+
+                        // The home's own server window holds a capture its spool now
+                        // owns (a handled one also its reserve window); the home's resend
+                        // pass delivers it after the window.
+                        var homeHold = settleHome.HandedOffCaptureHold(prepared.CrashId, fatal);
+                        if (homeHold > TimeSpan.Zero)
+                        {
+                            Interlocked.Decrement(ref _pendingCrashSends);
+                            WakeWorker();
+                            settleHome.WakeWorker();
+                            if (onSent != null) onSent(new ShardPilotResult(false, "crash_retry_after", true, homeHold));
+                            return true;
                         }
                     }
 
@@ -6216,7 +6295,7 @@ namespace ShardPilot
                         // above: nothing durable survives an aborted capture.
                         durability = ShardPilotCrashCaptureDurability.None;
                         _stats.RecordDropped(1);
-                        return false;
+                        return RefundCapSlot();
                     }
 
                     try
@@ -7038,7 +7117,7 @@ namespace ShardPilot
                 return;
             }
 
-            homeAtSend.ReArmCrashResendBackoffIfCurrent(homeEpochAtSend, result.RetryAfter);
+            homeAtSend.ReArmCrashResendBackoffIfCurrent(homeEpochAtSend, result.RetryAfter, result.Error == CrashFatalReserveError);
         }
 
         /// <summary>
@@ -7065,14 +7144,14 @@ namespace ShardPilot
         /// flush-interval floor is in-session pacing, mirroring the
         /// analytics worker's retry wait.
         /// </summary>
-        private void ReArmCrashResendBackoffIfCurrent(long epochAtSend, TimeSpan rawRetryAfter)
+        private void ReArmCrashResendBackoffIfCurrent(long epochAtSend, TimeSpan rawRetryAfter, bool fatalReserve = false)
         {
             // The JSON-lane callers deliberately do NOT guard on the crash
             // disable epoch: an opt-out does not condemn the SPOOLED backlog
             // (it stays durable and legitimately re-sends if re-enabled
             // within retention), so server backpressure earned by one of its
             // sends keeps governing it across an opt-out/re-enable cycle.
-            ReArmCrashResendBackoffIfCurrent(epochAtSend, CrashDisableEpochUnguarded, rawRetryAfter);
+            ReArmCrashResendBackoffIfCurrent(epochAtSend, CrashDisableEpochUnguarded, rawRetryAfter, fatalReserve);
         }
 
         /// <summary>
@@ -7083,7 +7162,7 @@ namespace ShardPilot
         /// </summary>
         private const long CrashDisableEpochUnguarded = -1L;
 
-        private void ReArmCrashResendBackoffIfCurrent(long epochAtSend, long crashDisableEpochAtSend, TimeSpan rawRetryAfter)
+        private void ReArmCrashResendBackoffIfCurrent(long epochAtSend, long crashDisableEpochAtSend, TimeSpan rawRetryAfter, bool fatalReserve = false)
         {
             lock (_gate)
             {
@@ -7117,19 +7196,13 @@ namespace ShardPilot
             // deadline must not let an absurd header park re-send for the
             // whole session either.
             var retryAfter = ShardPilotCrashSpool.ClampRetryAfter(rawRetryAfter);
-            if (retryAfter > TimeSpan.Zero)
-            {
-                ShardPilotCrashSpool.WriteRetryAfterDeadline(_settingsStore, _config, DateTime.UtcNow + retryAfter);
-            }
+            var serverDeadline = DateTime.UtcNow + retryAfter;
 
-            // The marker write above ran unlocked, so a denial can land
-            // inside it — AFTER SetConsent(false) already cleared the marker
-            // for the condemned backlog. Recheck under _gate: on a moved
-            // world the just-written marker is cleared again (write-then-
-            // recheck-then-undo, the same discipline as the spool appends)
-            // and the in-memory deadline is left untouched; otherwise the
-            // bump happens in this same lock hold, so it can never follow a
-            // denial's reset.
+            // The marker and both in-memory deadlines are published in ONE
+            // _gate hold below, so a dispatch decision under _gate sees all of
+            // them or none. A moved world publishes nothing: every wipe moves
+            // the denial or opt-out epoch under _gate before it clears the
+            // marker, so a write here either precedes that clear or is refused.
             // Floored on the CRASH plane's own constant, not on the flush
             // interval. A crash re-send is the one retry that must not slow
             // down when an integrator lengthens the idle analytics cadence:
@@ -7139,24 +7212,39 @@ namespace ShardPilot
             var floor = TimeSpan.FromSeconds(CrashResendRetryFloorSeconds);
             var wait = retryAfter > floor ? retryAfter : floor;
             var rearmDeadline = DateTime.UtcNow + wait;
-            var condemnedMeanwhile = false;
             lock (_gate)
             {
                 if (_consentState == ShardPilotConsentState.DeniedForcedMinor || _consentDenialEpoch != epochAtSend ||
                     (crashDisableEpochAtSend != CrashDisableEpochUnguarded &&
                      _crashDisableEpoch != crashDisableEpochAtSend))
                 {
-                    condemnedMeanwhile = true;
+                    return;
                 }
-                else if (rearmDeadline > _crashResendNotBefore)
-                {
-                    _crashResendNotBefore = rearmDeadline;
-                }
-            }
 
-            if (condemnedMeanwhile && retryAfter > TimeSpan.Zero)
-            {
-                ShardPilotCrashSpool.ClearRetryAfterDeadline(_settingsStore, _config);
+                // A fatal-reserve refusal opens the handled-only window, published the same
+                // way; the shared window, which also holds fatal reports, stays untouched.
+                if (fatalReserve && retryAfter > TimeSpan.Zero)
+                {
+                    Action publishReserve = () => ShardPilotCrashSpool.WriteRetryAfterDeadline(_settingsStore, _config, serverDeadline, true);
+                    if (_crashSpool == null) publishReserve();
+                    else if (!_crashSpool.PublishWhileOwned(publishReserve)) return;
+                    if (serverDeadline > _crashHandledNotBefore) _crashHandledNotBefore = serverDeadline;
+                    return;
+                }
+
+                if (retryAfter > TimeSpan.Zero)
+                {
+                    // Published only while this client still owns the scope, atomically
+                    // with Disown: a disowned predecessor publishes nothing.
+                    Action publish = () => ShardPilotCrashSpool.WriteRetryAfterDeadline(_settingsStore, _config, serverDeadline);
+                    if (_crashSpool == null) publish();
+                    else if (!_crashSpool.PublishWhileOwned(publish)) return;
+                    var publishedHook = CrashRetryAfterPublishedHookForTesting;
+                    if (publishedHook != null) publishedHook();
+                }
+
+                if (rearmDeadline > _crashResendNotBefore) _crashResendNotBefore = rearmDeadline;
+                if (retryAfter > TimeSpan.Zero && serverDeadline > _crashServerRetryAfterNotBefore) _crashServerRetryAfterNotBefore = serverDeadline;
             }
         }
 
@@ -7203,6 +7291,25 @@ namespace ShardPilot
         /// lock hold — so a verdict can never be paired with an epoch from
         /// a different consent world.
         /// </summary>
+        // The server Retry-After still in force on this (durable home) client,
+        // when its own spool holds the handed-off record; zero otherwise. Read
+        // under _gate, where the re-arm publishes the marker and the mirror.
+        private TimeSpan HandedOffCaptureHold(string crashId, bool fatal)
+        {
+            if (_crashSpool == null || !_crashSpool.ContainsPendingRecord(crashId)) return TimeSpan.Zero;
+            lock (_gate)
+            {
+                var stored = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config);
+                var until = stored > _crashServerRetryAfterNotBefore ? stored : _crashServerRetryAfterNotBefore;
+                if (until > _crashResendNotBefore) _crashResendNotBefore = until;
+                var reserve = fatal ? DateTime.MinValue : ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config, true);
+                if (reserve > _crashHandledNotBefore) _crashHandledNotBefore = reserve;
+                if (!fatal && _crashHandledNotBefore > until) until = _crashHandledNotBefore;
+                var remaining = until - DateTime.UtcNow;
+                return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+            }
+        }
+
         private bool TrySnapshotConsentForDispatch(bool needsGrant, out long epoch, out long crashEpoch)
         {
             lock (_gate)
@@ -7433,6 +7540,15 @@ namespace ShardPilot
             // Cheap no-op when nothing expired; spool lock is a leaf lock.
             _crashSpool.PruneExpiredRecords();
 
+            // A re-arm persists its marker before it raises the in-memory deadline,
+            // so the pass reads the marker first and holds for it; the epochs catch
+            // a read that a consent wipe or a crash opt-out made stale.
+            var denialEpochAtRead = Interlocked.Read(ref _consentDenialEpoch);
+            var crashEpochAtRead = Interlocked.Read(ref _crashDisableEpoch);
+            var storedRetryAfter = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config);
+            var storedReserve = ShardPilotCrashSpool.ReadRetryAfterDeadline(_settingsStore, _config, true);
+            var preGateHook = Interlocked.Exchange(ref CrashResendPassPreGateHookForTesting, null);
+            if (preGateHook != null) preGateHook();
             long epoch;
             lock (_gate)
             {
@@ -7441,6 +7557,18 @@ namespace ShardPilot
                 if (_closed || _crashResendActive || !CrashCollectionAllowedLocked)
                 {
                     return;
+                }
+
+                if (storedRetryAfter > _crashResendNotBefore && denialEpochAtRead == _consentDenialEpoch &&
+                    crashEpochAtRead == _crashDisableEpoch)
+                {
+                    _crashResendNotBefore = storedRetryAfter;
+                }
+
+                if (storedReserve > _crashHandledNotBefore && denialEpochAtRead == _consentDenialEpoch &&
+                    crashEpochAtRead == _crashDisableEpoch)
+                {
+                    _crashHandledNotBefore = storedReserve;
                 }
 
                 if (DateTime.UtcNow < _crashResendNotBefore)
@@ -7481,9 +7609,9 @@ namespace ShardPilot
         // same method the send path calls, at the current consent epoch, so a
         // test can observe the deadline the floor produces without staging a
         // whole crash upload.
-        internal void ReArmCrashResendBackoffForTesting(TimeSpan rawRetryAfter)
+        internal void ReArmCrashResendBackoffForTesting(TimeSpan rawRetryAfter, bool fatalReserve = false)
         {
-            ReArmCrashResendBackoffIfCurrent(_consentDenialEpoch, rawRetryAfter);
+            ReArmCrashResendBackoffIfCurrent(_consentDenialEpoch, rawRetryAfter, fatalReserve);
         }
 
         internal DateTime CrashResendNotBeforeForTesting
@@ -7531,6 +7659,8 @@ namespace ShardPilot
                 }
 
                 notBefore = _crashResendNotBefore;
+                // Held handled records are due when the fatal-reserve window ends.
+                if (_crashHandledNotBefore > DateTime.UtcNow && (notBefore <= DateTime.UtcNow || _crashHandledNotBefore < notBefore)) notBefore = _crashHandledNotBefore;
             }
 
             if (notBefore == DateTime.MinValue)
@@ -7655,6 +7785,8 @@ namespace ShardPilot
                     }
 
                     withholdContext = needsGrant && _consentState != ShardPilotConsentState.Granted;
+                    // A handled record waits out the fatal-reserve window; fatal records go on.
+                    withholdContext |= _utcNow() < _crashHandledNotBefore && replayPayload.Contains("\"fatal\":false");
                     if (!withholdContext) Interlocked.Increment(ref _pendingCrashSends);
                 }
 
@@ -7687,6 +7819,14 @@ namespace ShardPilot
                             {
                                 _stats.RecordFailure(result.Error);
                                 SettleCrashReport(this, epoch, record.Id, result);
+                                advance = true;
+                            }
+                            else if (result.Error == CrashFatalReserveError && result.RetryAfter > TimeSpan.Zero)
+                            {
+                                // Only handled reports are refused: keep the record, open their
+                                // window and go on with the pass so fatal records still go out.
+                                _stats.RecordFailure(result.Error);
+                                ReArmCrashResendBackoffIfCurrent(epoch, result.RetryAfter, true);
                                 advance = true;
                             }
                             else
@@ -7778,15 +7918,18 @@ namespace ShardPilot
                 return ParseAcceptedCrashResponse(response.Body);
             }
 
+            var errorCode = ShardPilotUnityWebRequestTransport.BuildStatusException(
+                (int)response.StatusCode, null, response.Body).ErrorCode;
             var disabledKind = (response.StatusCode == 400 || response.StatusCode == 404) &&
-                string.Equals(ShardPilotUnityWebRequestTransport.BuildStatusException(
-                    (int)response.StatusCode, null, response.Body).ErrorCode,
-                    "kind_not_enabled", StringComparison.Ordinal);
+                string.Equals(errorCode, "kind_not_enabled", StringComparison.Ordinal);
+            // The reserve refuses handled reports only; fatal reports keep their quota.
+            var fatalReserve = response.StatusCode == 429 &&
+                string.Equals(errorCode, "crash_monthly_quota_fatal_reserve", StringComparison.Ordinal);
             var retryable = disabledKind || response.StatusCode == 408 || response.StatusCode == 429 || response.StatusCode >= 500;
             var retryAfter = response.RetryAfterSeconds > 0
                 ? TimeSpan.FromSeconds(response.RetryAfterSeconds)
                 : TimeSpan.Zero;
-            return new ShardPilotResult(false, disabledKind ? "kind_not_enabled" : "status " + response.StatusCode,
+            return new ShardPilotResult(false, disabledKind ? "kind_not_enabled" : fatalReserve ? CrashFatalReserveError : "status " + response.StatusCode,
                 retryable, retryAfter);
         }
 
@@ -10318,6 +10461,8 @@ namespace ShardPilot
                 lock (_gate)
                 {
                     _crashResendNotBefore = DateTime.MinValue;
+                    _crashServerRetryAfterNotBefore = DateTime.MinValue;
+                    _crashHandledNotBefore = DateTime.MinValue;
                 }
 
                 ShardPilotAnrEraStore.WipeScope(_config, _settingsStore, message => SafeLog("{0}", message));
@@ -14213,7 +14358,7 @@ namespace ShardPilot
             lock (_crashDispatchGate) { }
             _crashSpool?.Wipe();
             ShardPilotCrashSpool.ClearRetryAfterDeadline(_settingsStore, _config);
-            lock (_gate) { _crashResendNotBefore = DateTime.MinValue; }
+            lock (_gate) { _crashResendNotBefore = _crashServerRetryAfterNotBefore = _crashHandledNotBefore = DateTime.MinValue; }
             ShardPilotAnrEraStore.WipeScope(_config, _settingsStore, message => SafeLog("{0}", message));
             ShardPilotAeiCursor.RecordSuppressionFloor(_settingsStore, _config, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
@@ -15195,6 +15340,8 @@ namespace ShardPilot
             lock (_gate)
             {
                 _crashResendNotBefore = DateTime.MinValue;
+                _crashServerRetryAfterNotBefore = DateTime.MinValue;
+                _crashHandledNotBefore = DateTime.MinValue;
             }
 
             // The maybe-denial condemns sibling scopes' files too — the same
@@ -17621,9 +17768,9 @@ namespace ShardPilot
         /// <summary>
         /// Surfaces each non-accepted per-event verdict from a 202 batch
         /// response through the SDK logger so integrators learn their events
-        /// were observed (unregistered in the tracking plan), rejected
-        /// (blocked/unknown property/schema mismatch), or suppressed by
-        /// consent — outcomes that are otherwise silently lost inside a
+        /// were rejected (name not registered in the tracking plan, blocked,
+        /// unknown property or schema mismatch), folded as duplicates, or
+        /// suppressed by consent — outcomes that are otherwise silently lost inside a
         /// "successful" 202. These are terminal server decisions, not transport
         /// failures: the batch is never re-sent on their account (a duplicate
         /// in particular is terminal, never retried).

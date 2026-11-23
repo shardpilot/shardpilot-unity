@@ -15,6 +15,8 @@ namespace ShardPilot
         public string Store, StoreRegion;
         public ShardPilotConsentPolicyAgeBand AgeBand;
         public bool Advisory;
+        /// <summary>Asks for the version 1 age and ads rules; off by default. A request that asks for them sends no age band.</summary>
+        public bool AgeAdsRules;
         /// <summary>Optional total preparation deadline, a whole number of seconds from 1 to 10; null keeps two seconds.</summary>
         public TimeSpan? Deadline;
     }
@@ -53,6 +55,36 @@ namespace ShardPilot
             RowBasis = rowBasis; AdvisoryBasis = advisoryBasis; Matrix = matrix; ResolvedBy = resolvedBy;
         }
     }
+
+    /// <summary>One half-open age range: from MinAge up to, but not including, MaxAgeExclusive.</summary>
+    public sealed class ShardPilotAgeRange
+    {
+        public int MinAge { get; }
+        public int MaxAgeExclusive { get; }
+        internal ShardPilotAgeRange(int minAge, int maxAgeExclusive) { MinAge = minAge; MaxAgeExclusive = maxAgeExclusive; }
+    }
+
+    /// <summary>Version 1 age and ads rules exactly as the server sent them. The SDK neither stores nor applies them.</summary>
+    public sealed class ShardPilotAgeAdsRules
+    {
+        public string RulesVersion { get; }
+        public int MinimumAdmissionAge { get; }
+        public int MinimumPersonalisedAdsAge { get; }
+        public bool AdSdkConsentWindowRequired { get; }
+        public IReadOnlyList<ShardPilotAgeRange> AdSdkSeparateConsentAgeRanges { get; }
+        /// <summary>How adults choose personalised ads: consent_window, opt_out or opt_in.</summary>
+        public string PersonalisedAdsMode { get; }
+        public string? AdmissionTextId { get; }
+        public string? ConsentWindowTextId { get; }
+        public string? SeparateAdsConsentTextId { get; }
+        internal ShardPilotAgeAdsRules(string rulesVersion, int minimumAdmissionAge, int minimumPersonalisedAdsAge, bool consentWindowRequired,
+            IReadOnlyList<ShardPilotAgeRange> ranges, string mode, string? admission, string? consentWindow, string? separateAdsConsent)
+        {
+            RulesVersion = rulesVersion; MinimumAdmissionAge = minimumAdmissionAge; MinimumPersonalisedAdsAge = minimumPersonalisedAdsAge;
+            AdSdkConsentWindowRequired = consentWindowRequired; AdSdkSeparateConsentAgeRanges = ranges; PersonalisedAdsMode = mode;
+            AdmissionTextId = admission; ConsentWindowTextId = consentWindow; SeparateAdsConsentTextId = separateAdsConsent;
+        }
+    }
 #nullable restore annotations
 
     /// <summary>A local strict decision. It never grants analytics or enables capture.</summary>
@@ -70,9 +102,10 @@ namespace ShardPilot
         public string Reason { get; }
 #nullable enable annotations
         public ShardPilotConsentPolicyAdvisory? Advisory { get; }
+        public ShardPilotAgeAdsRules? AgeAdsRules { get; }
 #nullable restore annotations
-        internal ShardPilotConsentPolicyDecision(string reason, ShardPilotConsentPolicyAdvisory advisory = null)
-        { Reason = reason; Advisory = advisory; }
+        internal ShardPilotConsentPolicyDecision(string reason, ShardPilotConsentPolicyAdvisory advisory = null, ShardPilotAgeAdsRules rules = null)
+        { Reason = reason; Advisory = advisory; AgeAdsRules = rules; }
     }
 
     internal static class ShardPilotConsentPolicy
@@ -93,12 +126,14 @@ namespace ShardPilot
         internal static void Prepare(ShardPilotConsentPolicyContext context, Action<ShardPilotConsentPolicyDecision> callback)
         {
             if (callback == null) throw new ArgumentNullException(nameof(callback));
-            void settle(string reason, ShardPilotConsentPolicyAdvisory advisory = null)
+            Action unregister = null;
+            Action<ShardPilotConsentPolicyDecision> takeCallback()
             {
                 var host = Interlocked.Exchange(ref callback, null);
-                try { host?.Invoke(new ShardPilotConsentPolicyDecision(reason, advisory)); }
-                catch { /* A host callback cannot break transport completion. */ }
+                if (host != null) Interlocked.Exchange(ref unregister, null)?.Invoke();
+                return host;
             }
+            void settle(string reason) => Notify(takeCallback(), reason);
             string root, body;
             try
             {
@@ -107,8 +142,13 @@ namespace ShardPilot
             catch { settle("invalid_request"); return; }
 
             var limit = context.Deadline?.TotalSeconds ?? DefaultDeadlineSeconds;
-            var clock = ClockForTesting ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
+            var testClock = ClockForTesting;
+            var clock = testClock ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
             var started = ReadClock(clock);
+            // Elapsed real time also advances while the game is paused or the wall clock is corrected.
+            Func<double> elapsedClock = testClock ?? MonotonicSeconds;
+            var deadline = (testClock == null ? elapsedClock() : started) + limit;
+            bool due(double now) => now >= started + limit || ReadClock(elapsedClock) >= deadline;
             long epoch, dispatch = 0;
             lock (OrderGate)
             {
@@ -126,27 +166,50 @@ namespace ShardPilot
             };
             request.BeforeSend = () =>
             {
+                if (Volatile.Read(ref callback) == null) return false;
                 var now = ReadClock(clock);
                 var reason = PendingReason(now, started, limit, epoch, dispatch, false);
+                if (reason == null && due(now)) reason = "deadline_exceeded";
                 if (reason != null) { settle(reason); return false; }
                 request.Timeout = TimeSpan.FromSeconds(Math.Max(0.001, started + limit - now));
                 return true;
             };
+            void complete(ShardPilotHttpResponse response, string fallback = null)
+            {
+                var host = takeCallback();
+                if (host == null) return;
+                var arrived = ReadClock(clock);
+                var reason = PendingReason(arrived, started, limit, epoch, dispatch, true);
+                ShardPilotConsentPolicyAdvisory advisory = null; ShardPilotAgeAdsRules rules = null;
+                if (reason == null) reason = due(arrived) ? "deadline_exceeded" : fallback;
+                if (reason == null) reason = ResponseReason(response, body, arrived, out advisory, out rules);
+                Notify(host, reason, advisory, rules);
+            }
+
             try
             {
+                var dispatcher = ShardPilotDispatcher.Instance;
+                void tick() { if (due(ReadClock(clock))) complete(null, "deadline_exceeded"); }
+                void retired() => complete(null, "transport_error");
+                unregister = () => dispatcher.UnregisterConsentPolicyDeadline(tick, retired);
+                dispatcher.RegisterConsentPolicyDeadline(tick, retired);
+                if (Volatile.Read(ref callback) == null) return;
                 var sender = SenderFactoryForTesting == null
-                    ? new ShardPilotUnityHttpRequestSender() : SenderFactoryForTesting();
+                    ? new ShardPilotUnityHttpRequestSender(dispatcher) : SenderFactoryForTesting();
                 if (sender == null) { settle("transport_unavailable"); return; }
-                sender.Send(request, response =>
-                {
-                    var arrived = ReadClock(clock);
-                    var reason = PendingReason(arrived, started, limit, epoch, dispatch, true);
-                    ShardPilotConsentPolicyAdvisory advisory = null;
-                    if (reason == null) reason = ResponseReason(response, body, arrived, out advisory);
-                    settle(reason, advisory);
-                });
+                sender.Send(request, response => complete(response));
             }
             catch { settle("transport_error"); }
+        }
+
+        private static double MonotonicSeconds() =>
+            (double)System.Diagnostics.Stopwatch.GetTimestamp() / System.Diagnostics.Stopwatch.Frequency;
+
+        private static void Notify(Action<ShardPilotConsentPolicyDecision> callback, string reason, ShardPilotConsentPolicyAdvisory advisory = null,
+            ShardPilotAgeAdsRules rules = null)
+        {
+            try { callback?.Invoke(new ShardPilotConsentPolicyDecision(reason, advisory, rules)); }
+            catch { /* A host callback cannot break transport completion. */ }
         }
 
         private static double ReadClock(Func<double> clock)
@@ -187,9 +250,10 @@ namespace ShardPilot
             return needed.All(map.ContainsKey) && map.All(pair => allowed.Contains(pair.Key) && (pair.Value != null || nulls.Contains(pair.Key)));
         }
 
-        private static string ResponseReason(ShardPilotHttpResponse response, string requestBody, double now, out ShardPilotConsentPolicyAdvisory advisory)
+        private static string ResponseReason(ShardPilotHttpResponse response, string requestBody, double now, out ShardPilotConsentPolicyAdvisory advisory,
+            out ShardPilotAgeAdsRules rules)
         {
-            advisory = null;
+            advisory = null; rules = null;
             if (response == null || response.TransportError) return "transport_error";
             try
             {
@@ -203,6 +267,7 @@ namespace ShardPilot
                     return OneOf(reason, "invalid_request", "invalid_scope", "store_region_not_accepted", "unsupported_app_version", "policy_unavailable")
                         ? (string)reason : "policy_unavailable";
                 advisory = CopyAdvisory(Map(Member(plan, "advisory")));
+                rules = Rules(Map(Member(plan, "age_ads_rules")));
                 return "plan_unsigned";
             }
             catch { return "invalid_response"; }
@@ -220,7 +285,7 @@ namespace ShardPilot
 
         private static bool ValidPlan(Dictionary<string, object> plan, Dictionary<string, object> request, double now, bool refusal)
         {
-            if (!Shape(plan, "regime flags policy_version consent_text_version presented_language scope signals_used band_vocabulary band_vocabulary_version expires_at max_age_seconds signature basis", "reason advisory", "signature")) return false;
+            if (!Shape(plan, "regime flags policy_version consent_text_version presented_language scope signals_used band_vocabulary band_vocabulary_version expires_at max_age_seconds signature basis", "reason advisory age_ads_rules", "signature")) return false;
             if (!OneOf(plan["regime"], "STRICT_OPT_IN", "SOFT_OPT_OUT", "UNKNOWN") || plan["signature"] != null) return false;
             var flags = Map(plan["flags"]); var scope = Map(plan["scope"]); var basis = Map(plan["basis"]);
             if (!Shape(flags, "crash_profile server_analytics child_rules operation_blocks") ||
@@ -250,7 +315,39 @@ namespace ShardPilot
             if (!Bounded(plan["expires_at"] as string, 64) || !Timestamp(plan["expires_at"] as string, out var expiry) || expiry <= now) return false;
             var age = plan["max_age_seconds"];
             if (!(age is long whole && whole >= 0) && !(age is double number && number >= 0 && !double.IsInfinity(number) && Math.Floor(number) == number)) return false;
+            // Rules are taken only on a resolved reply to a request that asked for them, and only whole.
+            if (plan.ContainsKey("age_ads_rules") && (refusal || !Equals(Member(request, "age_ads_rules_schema"), 1L) ||
+                Rules(Map(plan["age_ads_rules"])) == null)) return false;
             return !plan.ContainsKey("advisory") || !refusal && Equals(Member(request, "advisory"), true) && ValidAdvisory(Map(plan["advisory"]));
+        }
+
+        private static ShardPilotAgeAdsRules Rules(Dictionary<string, object> map)
+        {
+            if (!Shape(map, "schema_version rules_version minimum_admission_age minimum_personalised_ads_age " +
+                "ad_sdk_consent_window_required ad_sdk_separate_consent_age_ranges personalised_ads_mode text_ids")) return null;
+            var texts = Map(map["text_ids"]); var ranges = map["ad_sdk_separate_consent_age_ranges"] as List<object>;
+            if (!Equals(map["schema_version"], 1L) || !(map["rules_version"] is string version) || !Regex.IsMatch(version, @"\Asha256:[a-f0-9]{64}\z") ||
+                !Age(map["minimum_admission_age"], 13, 150, out var admission) || !Age(map["minimum_personalised_ads_age"], 18, 150, out var personalised) ||
+                !(map["ad_sdk_consent_window_required"] is bool window) || ranges == null || ranges.Count > 69 ||
+                !OneOf(map["personalised_ads_mode"], "consent_window", "opt_out", "opt_in") ||
+                !Shape(texts, "", "admission consent_window separate_ads_consent") ||
+                !texts.Values.All(id => id is string text && Regex.IsMatch(text, @"\A[a-z][a-z0-9_]{0,63}\z"))) return null;
+            var typed = new List<ShardPilotAgeRange>();
+            foreach (var item in ranges)
+            {
+                var range = Map(item);
+                if (!Shape(range, "min_age max_age_exclusive") || !Age(range["min_age"], 13, 150, out var min) ||
+                    !Age(range["max_age_exclusive"], 14, 151, out var max) || min >= max) return null;
+                typed.Add(new ShardPilotAgeRange(min, max));
+            }
+            return new ShardPilotAgeAdsRules(version, admission, personalised, window, typed.AsReadOnly(), (string)map["personalised_ads_mode"],
+                Member(texts, "admission") as string, Member(texts, "consent_window") as string, Member(texts, "separate_ads_consent") as string);
+        }
+
+        private static bool Age(object value, int minimum, int maximum, out int age)
+        {
+            age = value is long whole && whole >= minimum && whole <= maximum ? (int)whole : 0;
+            return age != 0;
         }
 
         private static bool ValidAdvisory(Dictionary<string, object> advisory)
@@ -328,7 +425,7 @@ namespace ShardPilot
             if (context.Store != null && context.Store != "steam" && context.Store != "apple" &&
                 context.Store != "google_play" && context.Store != "standalone") return false;
             var age = context.AgeBand;
-            if (age != null && (!Bounded(age.Vocabulary, 32) || !Bounded(age.Band, 32))) return false;
+            if (age != null && (context.AgeAdsRules || !Bounded(age.Vocabulary, 32) || !Bounded(age.Band, 32))) return false;
             root = ShardPilotConfig.NormalizePolicyEndpoint(context.AppUrl);
             var fields = new Dictionary<string, object>
             {
@@ -340,6 +437,7 @@ namespace ShardPilot
             if (age != null) fields.Add("age_band", new Dictionary<string, object>
                 { { "vocabulary", age.Vocabulary }, { "band", age.Band } });
             if (context.Advisory) fields.Add("advisory", true);
+            if (context.AgeAdsRules) fields.Add("age_ads_rules_schema", 1L);
             body = ShardPilotJson.CaptureMap(fields);
             return true;
         }

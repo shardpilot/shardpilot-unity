@@ -46,23 +46,23 @@ native code) is not captured. The public API is unstable before v1. See
 
 ## Install
 
-After `v0.16.3-alpha` is published, add the package as a UPM git dependency in the project's
+After `v0.18.0-alpha` is published, add the package as a UPM git dependency in the project's
 Packages/manifest.json:
 
 ```json
 {
   "dependencies": {
-    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.16.3-alpha"
+    "com.shardpilot.unity": "https://github.com/shardpilot/shardpilot-unity.git#v0.18.0-alpha"
   }
 }
 ```
 
 - Package name: `com.shardpilot.unity`. Requires Unity `2022.3` or later.
 - The `#v…` URL fragment pins the release tag; the owner creates release tags.
-  The candidate version is `0.16.3-alpha`; use a local package until its tag is published.
+  The candidate version is `0.18.0-alpha`; use a local package until its tag is published.
   CI matches this pin to `package.json`, not to the contents or existence of
   a tag. **`v0.11.0-alpha` includes the explicit application/sealed-fact
-  flow.** Unmarked API references below describe `0.16.3-alpha`.
+  flow.** Unmarked API references below describe `0.18.0-alpha`.
   Consent-policy preparation is **preview**: every reply returns the local
   strict fallback with `PlanUsed = false`; received policies are not adopted.
 - For local development, add the package folder through Unity Package
@@ -77,7 +77,7 @@ remains `Unknown`; it does not turn an advisory estimate into permission.
 1. Before initialization, call `ShardPilotSdk.PrepareConsentPolicy(context, callback)`
    on Unity's main thread. Supply `ShardPilotConsentPolicyContext` with `AppUrl`,
    `WorkspaceKey`, `AppKey`, `EnvironmentKey`, `AppVersion`, `Locale`, `Platform`
-   and `Advisory = true`. The identifier-free request has a two-second deadline; optional
+   and `Advisory = true`. The callback runs once on the main thread; validation may settle inline, and a stalled sender settles on the first frame at or after the deadline. The identifier-free request has a two-second deadline; optional
    `Deadline` sets 1 to 10 whole seconds instead.
    Every decision remains `STRICT_OPT_IN`, `PlanUsed = false`; valid unsigned
    replies report `plan_unsigned`. Preparation grants no consent or admission.
@@ -134,9 +134,10 @@ integration written against `v0.6.0-alpha` gets wrong:
 - **Experiment assignment was introduced behind an opt-in.** Current
   applications use the explicit application flow below. Server enablement must be verified for
   the deployment; a capability or config flag does not establish availability.
-- **Non-fatal crash sampling defaults to 10.** An integration moving up from
-  `v0.6.0-alpha` that emits fewer than ten non-fatals per client instance now
-  reports none of them.
+- **Non-fatal crash reports are sent unsampled by default, up to a cap.**
+  `CrashSampleEvery` defaults to `1` and `CrashSessionMaxReports` admits at most
+  100 non-fatals per client instance; later ones are dropped. Expect more crash
+  traffic than the `v0.7.0-alpha` through `v0.16.3-alpha` default of `10`.
 
 ## Credentials
 
@@ -169,7 +170,7 @@ your normal secret-delivery path and keep placeholders in the repo.
 
 ## Initialize
 
-The following examples use the `0.16.3-alpha` scope API:
+The following examples use the `0.18.0-alpha` scope API:
 `WorkspaceKey`, `AppKey`, `EnvironmentKey`. Use a local package until its
 tag is published. The earlier `v0.11.0-alpha` tag uses
 `*Id` settings; the new source does not retain them as aliases.
@@ -687,22 +688,22 @@ unchanged.
   to sending; disabling stops **collection** as well as sending and clears
   the breadcrumb ring; a failed opt-out persist still applies process-wide.
 - **Sampling**: fatal crashes are NEVER sampled. Non-fatal (handled/logged)
-  reports are sampled 1-in-`CrashSampleEvery` per client instance; zero
+  reports are sampled 1-in-`CrashSampleEvery` (default 1, every report) and
+  capped at `CrashSessionMaxReports` (default 100) per client instance; zero
   suppresses all non-fatals but preserves fatal capture. There is
   ONE counter shared by every non-fatal source (managed non-fatals, ANR
   watchdog stalls), so the rate is one in N of the client's non-fatal reports
   in aggregate, never one in N of any single kind.
-  The pinned tag defaults to `10` (the cross-SDK canonical shared with the Go
-  and Defold SDKs); `v0.6.0-alpha` and earlier defaulted to `1`, sending every
-  non-fatal. **Set it explicitly if you depend on the rate** — an integration
-  moving up from `v0.6.0-alpha` that emits fewer than 10 non-fatals per client
-  instance will now report none of them.
+  The pinned tag defaults to `1`, sending every non-fatal up to the cap;
+  `v0.7.0-alpha` through `v0.16.3-alpha` defaulted to `10`. **Set it explicitly
+  if you depend on the rate.**
 - **Durable** when `SpoolEnabled` and `CrashSpoolEnabled` are true (the
   defaults): every accepted report is persisted at capture time
   (write-ahead, before the send — for a fatal crash "later" does not exist)
   and re-sent on the next launch until acknowledged, oldest first,
   de-duplicated by the stable `crash_id`; a server `Retry-After` persists
-  across relaunch; backlog retention is 7 days.
+  across relaunch (a `429` coded `crash_monthly_quota_fatal_reserve` holds
+  only non-fatal reports; fatal ones are still sent); backlog retention is 7 days.
 - Manual capture: `ShardPilotSdk.Client.CaptureCrash(ShardPilotCrashEvent
   crashEvent, Action<ShardPilotResult> onSent = null)` returns `false` when
   refused (no key, disabled, closed, invalid, sampled away).
@@ -838,4 +839,4 @@ integration code:
   band forcing decision; see the consent section for how it gates.
 - **WebGL**: no spools (in-memory only), and the worker runs as a
   frame-ticked coroutine.
-- **Release pin**: this guide targets `v0.16.3-alpha`, including request compression. Use a local package until that tag is published.
+- **Release pin**: this guide targets `v0.18.0-alpha`, including request compression. Use a local package until that tag is published.

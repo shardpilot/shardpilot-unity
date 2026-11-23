@@ -33,8 +33,8 @@ public sealed class ShardPilotEngineSmokeSample : MonoBehaviour
             AppVersion = Application.version,
             // The smoke emits exactly ONE synthetic handled (non-fatal)
             // exception below and the runbook expects it on the crash
-            // service, so send every non-fatal report instead of the
-            // default 1-in-10 sampling.
+            // service, so pin sending every non-fatal report (also the
+            // default) explicitly.
             CrashSampleEvery = 1
         });
 

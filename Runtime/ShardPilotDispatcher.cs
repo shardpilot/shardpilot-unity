@@ -79,6 +79,31 @@ namespace ShardPilot
             }
         }
 
+        private volatile Action _consentPolicyDeadlines;
+
+        internal void RegisterConsentPolicyDeadline(Action tick, Action retired)
+        {
+            lock (_gate)
+            {
+                if (!_retired)
+                {
+                    _consentPolicyDeadlines += tick;
+                    _retirement.Add(retired);
+                    return;
+                }
+            }
+            retired();
+        }
+
+        internal void UnregisterConsentPolicyDeadline(Action tick, Action retired)
+        {
+            lock (_gate)
+            {
+                _consentPolicyDeadlines -= tick;
+                _retirement.Remove(retired);
+            }
+        }
+
         public void Run(IEnumerator routine)
         {
             lock (_gate)
@@ -154,7 +179,7 @@ namespace ShardPilot
             var instance = _instance;
             if (instance == null) return;
             Action[] retired;
-            lock (instance._gate) { instance._retired = true; instance._work.Clear(); instance._hostCalls.Clear(); retired = new Action[instance._retirement.Count]; instance._retirement.CopyTo(retired); instance._retirement.Clear(); }
+            lock (instance._gate) { instance._retired = true; instance._consentPolicyDeadlines = null; instance._work.Clear(); instance._hostCalls.Clear(); retired = new Action[instance._retirement.Count]; instance._retirement.CopyTo(retired); instance._retirement.Clear(); }
             _instance = null;
             foreach (var cancel in retired) { try { cancel(); } catch { /* Settle every owner even if a callback throws. */ } }
             if (Application.isPlaying) Destroy(instance.gameObject);
@@ -1123,6 +1148,8 @@ namespace ShardPilot
         /// </summary>
         internal void DrainQueuedWork()
         {
+            // The delegate snapshot can run outside the gate; a callback may re-enter or retire the host.
+            _consentPolicyDeadlines?.Invoke();
             DrainHostCalls();
             while (true)
             {

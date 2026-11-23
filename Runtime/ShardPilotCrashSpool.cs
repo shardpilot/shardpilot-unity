@@ -57,6 +57,7 @@ namespace ShardPilot
 
         private const string WipeOwedMarkerKeyPrefix = "shardpilot.crashspool.wipe_owed.";
         private const string RetryAfterMarkerKeyPrefix = "shardpilot.crashspool.retry_after.";
+        private const string FatalReserveMarkerSuffix = ".fatal_reserve";
 
         /// <summary>
         /// Upper bound accepted for a crash Retry-After delay (one day,
@@ -349,6 +350,20 @@ namespace ShardPilot
         /// client owns the file, and a still-draining older client must not
         /// rewrite it from a stale in-memory view.
         /// </summary>
+        /// <summary>
+        /// Runs a scope-marker publication only while this spool still owns its
+        /// scope, under the same lock as <see cref="Disown"/>; false when disowned.
+        /// </summary>
+        public bool PublishWhileOwned(Action publish)
+        {
+            lock (_lock)
+            {
+                if (_disowned) return false;
+                publish();
+                return true;
+            }
+        }
+
         public void Disown()
         {
             lock (_lock)
@@ -1004,10 +1019,10 @@ namespace ShardPilot
         /// a send with 429/Retry-After. Stored per scope in the same
         /// key-value store as the consent markers so the backpressure request
         /// survives a relaunch (the in-memory analytics backoff does not).
-        /// Clamped to at most one day ahead. Best-effort; never throws.
+        /// Clamped to one day ahead; a stored later deadline is kept. Never throws.
         /// </summary>
         public static void WriteRetryAfterDeadline(
-            IShardPilotKeyValueStore store, ShardPilotConfig config, DateTime deadlineUtc)
+            IShardPilotKeyValueStore store, ShardPilotConfig config, DateTime deadlineUtc, bool fatalReserve = false)
         {
             if (store == null)
             {
@@ -1023,7 +1038,10 @@ namespace ShardPilot
                 }
 
                 var seconds = (long)(deadlineUtc - UnixEpoch).TotalSeconds;
-                store.Set(RetryAfterMarkerKey(config), seconds.ToString(CultureInfo.InvariantCulture));
+                lock (RetryAfterMarkerLock)
+                {
+                    if (ReadRetryAfterDeadline(store, config, fatalReserve) < UnixEpoch.AddSeconds(seconds)) store.Set(RetryAfterMarkerKey(config, fatalReserve), seconds.ToString(CultureInfo.InvariantCulture));
+                }
             }
             catch
             {
@@ -1043,7 +1061,17 @@ namespace ShardPilot
         /// into the accepted window and gate re-send for up to a day on
         /// some later launch. Never throws.
         /// </summary>
-        public static DateTime ReadRetryAfterDeadline(IShardPilotKeyValueStore store, ShardPilotConfig config)
+        public static DateTime ReadRetryAfterDeadline(IShardPilotKeyValueStore store, ShardPilotConfig config, bool fatalReserve = false)
+        {
+            // Classify-and-clear shares the write's lock, so clearing a spent marker
+            // cannot erase a fresh deadline written after the read.
+            lock (RetryAfterMarkerLock)
+            {
+                return ReadRetryAfterDeadlineLocked(store, config, fatalReserve);
+            }
+        }
+
+        private static DateTime ReadRetryAfterDeadlineLocked(IShardPilotKeyValueStore store, ShardPilotConfig config, bool fatalReserve)
         {
             if (store == null)
             {
@@ -1052,7 +1080,8 @@ namespace ShardPilot
 
             try
             {
-                var raw = ShardPilotConfig.Trim(store.Get(RetryAfterMarkerKey(config)));
+                var key = RetryAfterMarkerKey(config, fatalReserve);
+                var raw = ShardPilotConfig.Trim(store.Get(key));
                 if (string.IsNullOrEmpty(raw))
                 {
                     return DateTime.MinValue;
@@ -1061,7 +1090,7 @@ namespace ShardPilot
                 long seconds;
                 if (!long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out seconds))
                 {
-                    ClearRetryAfterDeadline(store, config);
+                    ClearMarkerKey(store, key);
                     return DateTime.MinValue;
                 }
 
@@ -1069,7 +1098,7 @@ namespace ShardPilot
                 var now = DateTime.UtcNow;
                 if (deadline <= now || deadline > now.AddSeconds(MaxRetryAfterSeconds))
                 {
-                    ClearRetryAfterDeadline(store, config);
+                    ClearMarkerKey(store, key);
                     return DateTime.MinValue;
                 }
 
@@ -1089,12 +1118,15 @@ namespace ShardPilot
                 return;
             }
 
+            ClearMarkerKey(store, RetryAfterMarkerKey(config, false));
+            ClearMarkerKey(store, RetryAfterMarkerKey(config, true));
+        }
+
+        private static void ClearMarkerKey(IShardPilotKeyValueStore store, string key)
+        {
             try
             {
-                if (!string.IsNullOrEmpty(ShardPilotConfig.Trim(store.Get(RetryAfterMarkerKey(config)))))
-                {
-                    store.Set(RetryAfterMarkerKey(config), string.Empty);
-                }
+                if (!string.IsNullOrEmpty(ShardPilotConfig.Trim(store.Get(key)))) store.Set(key, string.Empty);
             }
             catch
             {
@@ -1103,11 +1135,13 @@ namespace ShardPilot
         }
 
         private static readonly DateTime UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        private static readonly object RetryAfterMarkerLock = new object();
 
-        private static string RetryAfterMarkerKey(ShardPilotConfig config)
+        // The fatal-reserve window (handled reports only) is a sibling marker of the shared one.
+        private static string RetryAfterMarkerKey(ShardPilotConfig config, bool fatalReserve = false)
         {
             return RetryAfterMarkerKeyPrefix +
-                   ScopeHash(config.WorkspaceKey, config.AppKey, config.EnvironmentKey);
+                   ScopeHash(config.WorkspaceKey, config.AppKey, config.EnvironmentKey) + (fatalReserve ? FatalReserveMarkerSuffix : string.Empty);
         }
 
         /// <summary>
@@ -1123,18 +1157,8 @@ namespace ShardPilot
                 return;
             }
 
-            try
-            {
-                var key = RetryAfterMarkerKeyPrefix + scopeHash;
-                if (!string.IsNullOrEmpty(ShardPilotConfig.Trim(store.Get(key))))
-                {
-                    store.Set(key, string.Empty);
-                }
-            }
-            catch
-            {
-                // Best-effort; a stale marker self-expires by comparison.
-            }
+            ClearMarkerKey(store, RetryAfterMarkerKeyPrefix + scopeHash);
+            ClearMarkerKey(store, RetryAfterMarkerKeyPrefix + scopeHash + FatalReserveMarkerSuffix);
         }
 
         // ------------------------------------------------------------------
@@ -1147,9 +1171,9 @@ namespace ShardPilot
                    ScopeHash(config.WorkspaceKey, config.AppKey, config.EnvironmentKey);
         }
 
-        internal static string RetryAfterMarkerKeyForTesting(ShardPilotConfig config)
+        internal static string RetryAfterMarkerKeyForTesting(ShardPilotConfig config, bool fatalReserve = false)
         {
-            return RetryAfterMarkerKey(config);
+            return RetryAfterMarkerKey(config, fatalReserve);
         }
 
         // ------------------------------------------------------------------

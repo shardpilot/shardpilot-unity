@@ -114,6 +114,8 @@ namespace ShardPilot
         /// - <c>schema_revision_declaration</c>: false; engine builds do not declare it.
         /// - <c>consent_policy_advisory</c>: prepares validated advisory reference snapshots;
         ///   it does not promise non-objection recording or analytics admission.
+        /// - <c>consent_policy_age_ads_rules</c>: prepares validated version 1 age and ads rules on request;
+        ///   the SDK neither stores nor applies them.
         /// - <c>analytics_non_objection</c>: a current recorded ACK admits ordinary analytics
         ///   in process while consent stays Unknown; special consumers require a grant.
         /// </summary>
@@ -123,6 +125,7 @@ namespace ShardPilot
             {
                 case "consent_receipt_outbox":
                 case "consent_policy_advisory":
+                case "consent_policy_age_ads_rules":
                 case "analytics_non_objection":
                 case "consent_state_denied_forced_minor":
                 case "experiments_age_band":

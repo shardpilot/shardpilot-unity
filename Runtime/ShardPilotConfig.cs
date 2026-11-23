@@ -24,7 +24,8 @@ namespace ShardPilot
         public const long DefaultSpoolMaxBytes = 1024 * 1024;
         public const int DefaultCrashSpoolMaxReports = 50;
         public const long DefaultCrashSpoolMaxBytes = 512 * 1024;
-        public const int DefaultCrashSampleEvery = 10;
+        public const int DefaultCrashSampleEvery = 1;
+        public const int DefaultCrashSessionMaxReports = 100;
         public static readonly TimeSpan DefaultHangWatchdogThreshold = TimeSpan.FromSeconds(5);
 
         /// <summary>
@@ -223,13 +224,21 @@ namespace ShardPilot
         /// <summary>
         /// Send 1 in every N NON-FATAL crash reports (handled exceptions /
         /// logged exceptions), to bound volume from a noisy non-terminal error.
-        /// Default 10 (send every 10th non-fatal) — the cross-SDK canonical
-        /// default shared with the Go and Defold SDKs; set 1 to send every
-        /// non-fatal report. FATAL crashes are NEVER sampled — a terminating
+        /// Default 1 (send every non-fatal report; <see cref="CrashSessionMaxReports"/>
+        /// bounds the volume); N above 1 sends every Nth. FATAL crashes are
+        /// NEVER sampled — a terminating
         /// crash is always sent regardless of this value, bypassing the
         /// sampler, consistent across the ShardPilot SDKs.
         /// </summary>
         public int CrashSampleEvery { get; set; } = DefaultCrashSampleEvery;
+
+        /// <summary>
+        /// At most this many NON-FATAL crash reports are admitted per client,
+        /// counted after sampling. Default 100; a value below 1 falls back to
+        /// the default, so the cap cannot be removed. FATAL crashes are never
+        /// capped.
+        /// </summary>
+        public int CrashSessionMaxReports { get; set; } = DefaultCrashSessionMaxReports;
 
         /// <summary>Literal workspace key; never a server database ID.</summary>
         public string? WorkspaceKey { get; set; }
@@ -507,6 +516,11 @@ namespace ShardPilot
             if (clone.CrashSampleEvery < 0)
             {
                 clone.CrashSampleEvery = DefaultCrashSampleEvery;
+            }
+
+            if (clone.CrashSessionMaxReports < 1)
+            {
+                clone.CrashSessionMaxReports = DefaultCrashSessionMaxReports;
             }
 
             clone.WorkspaceKey = Trim(clone.WorkspaceKey);
