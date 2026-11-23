@@ -64,6 +64,17 @@ namespace ShardPilot
         internal ShardPilotAgeRange(int minAge, int maxAgeExclusive) { MinAge = minAge; MaxAgeExclusive = maxAgeExclusive; }
     }
 
+    /// <summary>The EEA rule for admitted players aged 13-15: the digital consent age, and what serves below it.</summary>
+    public sealed class ShardPilotTeenAdsRules
+    {
+        /// <summary>The age from 13 to 16 at which a player can consent for themselves.</summary>
+        public int DigitalConsentAge { get; }
+        /// <summary>What serves below that age: no_consent_only.</summary>
+        public string BelowDigitalConsentMode { get; }
+        internal ShardPilotTeenAdsRules(int digitalConsentAge, string belowDigitalConsentMode)
+        { DigitalConsentAge = digitalConsentAge; BelowDigitalConsentMode = belowDigitalConsentMode; }
+    }
+
     /// <summary>Version 1 age and ads rules exactly as the server sent them. The SDK neither stores nor applies them.</summary>
     public sealed class ShardPilotAgeAdsRules
     {
@@ -74,14 +85,17 @@ namespace ShardPilot
         public IReadOnlyList<ShardPilotAgeRange> AdSdkSeparateConsentAgeRanges { get; }
         /// <summary>How adults choose personalised ads: consent_window, opt_out or opt_in.</summary>
         public string PersonalisedAdsMode { get; }
+        /// <summary>The EEA teen rule; null outside the EEA.</summary>
+        public ShardPilotTeenAdsRules? TeenAds { get; }
         public string? AdmissionTextId { get; }
         public string? ConsentWindowTextId { get; }
         public string? SeparateAdsConsentTextId { get; }
         internal ShardPilotAgeAdsRules(string rulesVersion, int minimumAdmissionAge, int minimumPersonalisedAdsAge, bool consentWindowRequired,
-            IReadOnlyList<ShardPilotAgeRange> ranges, string mode, string? admission, string? consentWindow, string? separateAdsConsent)
+            IReadOnlyList<ShardPilotAgeRange> ranges, string mode, ShardPilotTeenAdsRules? teenAds, string? admission, string? consentWindow,
+            string? separateAdsConsent)
         {
             RulesVersion = rulesVersion; MinimumAdmissionAge = minimumAdmissionAge; MinimumPersonalisedAdsAge = minimumPersonalisedAdsAge;
-            AdSdkConsentWindowRequired = consentWindowRequired; AdSdkSeparateConsentAgeRanges = ranges; PersonalisedAdsMode = mode;
+            AdSdkConsentWindowRequired = consentWindowRequired; AdSdkSeparateConsentAgeRanges = ranges; PersonalisedAdsMode = mode; TeenAds = teenAds;
             AdmissionTextId = admission; ConsentWindowTextId = consentWindow; SeparateAdsConsentTextId = separateAdsConsent;
         }
     }
@@ -324,7 +338,7 @@ namespace ShardPilot
         private static ShardPilotAgeAdsRules Rules(Dictionary<string, object> map)
         {
             if (!Shape(map, "schema_version rules_version minimum_admission_age minimum_personalised_ads_age " +
-                "ad_sdk_consent_window_required ad_sdk_separate_consent_age_ranges personalised_ads_mode text_ids")) return null;
+                "ad_sdk_consent_window_required ad_sdk_separate_consent_age_ranges personalised_ads_mode teen_ads text_ids", "", "teen_ads")) return null;
             var texts = Map(map["text_ids"]); var ranges = map["ad_sdk_separate_consent_age_ranges"] as List<object>;
             if (!Equals(map["schema_version"], 1L) || !(map["rules_version"] is string version) || !Regex.IsMatch(version, @"\Asha256:[a-f0-9]{64}\z") ||
                 !Age(map["minimum_admission_age"], 13, 150, out var admission) || !Age(map["minimum_personalised_ads_age"], 18, 150, out var personalised) ||
@@ -332,6 +346,16 @@ namespace ShardPilot
                 !OneOf(map["personalised_ads_mode"], "consent_window", "opt_out", "opt_in") ||
                 !Shape(texts, "", "admission consent_window separate_ads_consent") ||
                 !texts.Values.All(id => id is string text && Regex.IsMatch(text, @"\A[a-z][a-z0-9_]{0,63}\z"))) return null;
+            ShardPilotTeenAdsRules teen = null;
+            if (Member(map, "teen_ads") != null)
+            {
+                // An EEA teen rule needs Google's window as the adult path: required window and consent_window mode.
+                var rule = Map(Member(map, "teen_ads"));
+                if (!Shape(rule, "digital_consent_age below_digital_consent_mode") || !Age(rule["digital_consent_age"], 13, 16, out var consentAge) ||
+                    !Equals(rule["below_digital_consent_mode"], "no_consent_only") || !window ||
+                    !Equals(map["personalised_ads_mode"], "consent_window")) return null;
+                teen = new ShardPilotTeenAdsRules(consentAge, "no_consent_only");
+            }
             var typed = new List<ShardPilotAgeRange>();
             foreach (var item in ranges)
             {
@@ -340,7 +364,7 @@ namespace ShardPilot
                     !Age(range["max_age_exclusive"], 14, 151, out var max) || min >= max) return null;
                 typed.Add(new ShardPilotAgeRange(min, max));
             }
-            return new ShardPilotAgeAdsRules(version, admission, personalised, window, typed.AsReadOnly(), (string)map["personalised_ads_mode"],
+            return new ShardPilotAgeAdsRules(version, admission, personalised, window, typed.AsReadOnly(), (string)map["personalised_ads_mode"], teen,
                 Member(texts, "admission") as string, Member(texts, "consent_window") as string, Member(texts, "separate_ads_consent") as string);
         }
 
